@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgentBridge — plain HTML embed</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 40px; color: #222; }
+      code { background: #f1f1f4; padding: 2px 6px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>AgentBridge demo (plain HTML)</h1>
+    <p>The chat bubble is in the bottom-right corner. It connects to the backend over WebSocket.</p>
+    <p>Make sure the backend is running: <code>cd backend &amp;&amp; agentbridge</code></p>
+
+    <!--
+      One script tag, served from the backend at /widget (built bundle).
+      data-server points at the WebSocket endpoint; data-position is optional.
+    -->
+    <script
+      src="http://localhost:8000/widget/agentbridge-widget.js"
+      data-server="ws://localhost:8000/ws"
+      data-position="bottom-right"
+    ></script>
+  </body>
+</html>

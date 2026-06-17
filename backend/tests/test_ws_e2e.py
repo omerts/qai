@@ -1,0 +1,173 @@
+"""End-to-end test through the real WebSocket endpoint in main.py.
+
+Registers an in-memory FakeAdapter, points the server at a temp git repo, and drives the
+full flow: list_agents -> start_session -> user_message (agent edits a file) ->
+branch_suggested -> create_branch -> create_pr (GitHub mocked).
+"""
+
+import asyncio
+import subprocess
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from agentbridge import config, git_service
+from agentbridge.agents import registry
+from agentbridge.agents.base import AgentAdapter, AgentEvent, Capabilities, SessionContext
+
+
+def _init_repo(path: Path) -> None:
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=path, check=True)
+    subprocess.run(["git", "remote", "add", "origin", "git@github.com:acme/widgets.git"], cwd=path, check=True)
+    (path / "README.md").write_text("hi\n")
+    subprocess.run(["git", "add", "."], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=path, check=True)
+
+
+class FakeAdapter(AgentAdapter):
+    name = "fake"
+    label = "Fake"
+
+    @classmethod
+    def is_available(cls) -> bool:
+        return True
+
+    def capabilities(self) -> Capabilities:
+        return Capabilities()
+
+    async def start(self, ctx: SessionContext) -> None:
+        pass
+
+    async def send(self, text: str):
+        (self.workspace / "feature.txt").write_text("new feature\n")
+        yield AgentEvent.chunk("Added feature.txt")
+        yield AgentEvent.file("feature.txt")
+        yield AgentEvent.done()
+
+    async def stop(self) -> None:
+        pass
+
+
+class InteractiveFakeAdapter(AgentAdapter):
+    """Emits a prompt and blocks until resolve_prompt is called — exercises the
+    concurrent message-handling path (agent_response received mid-turn)."""
+
+    name = "ifake"
+    label = "Interactive Fake"
+
+    def __init__(self, workspace: Path) -> None:
+        super().__init__(workspace)
+        self._future = None
+
+    @classmethod
+    def is_available(cls) -> bool:
+        return True
+
+    def capabilities(self) -> Capabilities:
+        return Capabilities(interactive=True)
+
+    async def start(self, ctx: SessionContext) -> None:
+        pass
+
+    async def send(self, text: str):
+        self._future = asyncio.get_event_loop().create_future()
+        yield AgentEvent.prompt("req-1", "Allow edit to app.py?", options=["Allow", "Deny"])
+        answer = await self._future
+        if answer == "Allow":
+            (self.workspace / "app.py").write_text("# edited\n")
+            yield AgentEvent.file("app.py")
+        yield AgentEvent.done()
+
+    async def resolve_prompt(self, request_id: str, answer: str) -> None:
+        if self._future is not None and not self._future.done():
+            self._future.set_result(answer)
+
+    async def stop(self) -> None:
+        pass
+
+
+@pytest.fixture
+def client(tmp_path: Path, monkeypatch):
+    _init_repo(tmp_path)
+    # Point the server at the temp repo and give it a token.
+    monkeypatch.setenv("AGENTBRIDGE_WORKSPACE", str(tmp_path))
+    config.get_settings.cache_clear()
+    config.github_token.cache_clear()
+    monkeypatch.setattr(config.Settings, "github_token", property(lambda self: "fake-token"))
+    # Register the fake adapters.
+    monkeypatch.setitem(registry._ADAPTERS, "fake", FakeAdapter)
+    monkeypatch.setitem(registry._ADAPTERS, "ifake", InteractiveFakeAdapter)
+    # Mock the GitHub PR API and the push (no real remote).
+    monkeypatch.setattr(git_service.GitService, "push", lambda self, *a, **k: None)
+
+    class FakeResp:
+        status_code = 201
+
+        def json(self):
+            return {"html_url": "https://github.com/acme/widgets/pull/7", "number": 7}
+
+    monkeypatch.setattr(git_service.httpx, "post", lambda *a, **k: FakeResp())
+
+    from agentbridge.main import app
+
+    return TestClient(app), tmp_path
+
+
+def _recv_until(ws, type_, limit=20):
+    for _ in range(limit):
+        msg = ws.receive_json()
+        if msg["type"] == type_:
+            return msg
+    raise AssertionError(f"did not receive '{type_}'")
+
+
+def test_full_session_flow(client):
+    tc, repo = client
+    with tc.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "list_agents"})
+        agents = {a["name"] for a in _recv_until(ws, "agents")["agents"]}
+        assert "fake" in agents
+
+        ws.send_json({"type": "start_session", "agent": "fake", "title": "add feature"})
+        started = _recv_until(ws, "session_started")
+        assert started["branch"] == "main"
+
+        ws.send_json({"type": "user_message", "text": "add a feature"})
+        suggested = _recv_until(ws, "branch_suggested")
+        assert "agentbridge/" in suggested["suggested_name"]
+        # File the agent created is really on disk.
+        assert (repo / "feature.txt").exists()
+
+        # User accepts the branch suggestion.
+        ws.send_json({"type": "create_branch", "name": suggested["suggested_name"]})
+        created = _recv_until(ws, "branch_created")
+        assert created["branch"].startswith("agentbridge/")
+
+        # Open a PR.
+        ws.send_json({"type": "create_pr", "title": "Add feature"})
+        pr = _recv_until(ws, "pr_created")
+        assert pr["url"].endswith("/pull/7")
+        assert pr["number"] == 7
+
+
+def test_interactive_prompt_round_trip(client):
+    """The turn blocks on a prompt; the server must still receive agent_response and
+    route it so the turn can complete. This validates concurrent message handling."""
+    tc, repo = client
+    with tc.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "start_session", "agent": "ifake"})
+        _recv_until(ws, "session_started")
+
+        ws.send_json({"type": "user_message", "text": "edit app.py"})
+        prompt = _recv_until(ws, "agent_prompt")
+        assert prompt["options"] == ["Allow", "Deny"]
+
+        # Reply while the agent turn is still blocked awaiting this answer.
+        ws.send_json({"type": "agent_response", "request_id": prompt["request_id"], "answer": "Allow"})
+
+        # The turn resumes, the file is written, and we return to idle.
+        _recv_until(ws, "file_changes")
+        assert (repo / "app.py").exists()

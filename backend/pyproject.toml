@@ -1,0 +1,34 @@
+[project]
+name = "agentbridge"
+version = "0.1.0"
+description = "Talk to a coding agent from your app's frontend and have it make changes to your dev environment."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.6",
+    "gitpython>=3.1",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+# Real agent integrations. Install the ones you have access to.
+# ClaudeSDKClient + can_use_tool (interactive permissions) require a recent SDK.
+claude = ["claude-code-sdk>=0.0.20"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+agentbridge = "agentbridge.main:run"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agentbridge*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
