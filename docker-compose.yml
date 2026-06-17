@@ -1,0 +1,29 @@
+# AgentBridge backend.
+#
+# 1. Copy .env.example to .env and set WORKSPACE (the repo the agent should edit) plus
+#    credentials (ANTHROPIC_API_KEY for Claude Code, GITHUB_TOKEN for PR creation).
+# 2. docker compose up --build
+# 3. Embed the widget pointing at ws://localhost:8000/ws (see widget/README.md).
+
+services:
+  backend:
+    build:
+      context: .                     # repo root — needed to include widget/dist
+      dockerfile: backend/Dockerfile
+    image: agentbridge-backend
+    ports:
+      - "${AGENTBRIDGE_PORT:-8000}:8000"
+    environment:
+      AGENTBRIDGE_WORKSPACE: /workspace
+      AGENTBRIDGE_HOST: 0.0.0.0
+      AGENTBRIDGE_PORT: 8000
+      AGENTBRIDGE_AGENT: ${AGENTBRIDGE_AGENT:-claude-code}
+      # Credentials (set in .env). Empty values are harmless if unused.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    volumes:
+      # The repo the agent operates on. Read-write: the agent edits files and runs git here.
+      - ${WORKSPACE:?set WORKSPACE in .env to the absolute path of the repo to edit}:/workspace
+      # Optional: reuse the host git identity for commits (read-only).
+      - ${HOME}/.gitconfig:/root/.gitconfig:ro
+    restart: unless-stopped

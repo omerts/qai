@@ -49,6 +49,17 @@ Configuration (all optional, via env vars):
 | `AGENTBRIDGE_PORT`       | `8000`        | Bind port                                |
 | `GITHUB_TOKEN`/`GH_TOKEN`| —             | PR creation (falls back to `gh auth token`) |
 
+### Run with Docker (alternative to step 1)
+
+```bash
+cp .env.example .env          # set WORKSPACE (repo to edit), ANTHROPIC_API_KEY, GITHUB_TOKEN
+docker compose up --build     # server on http://localhost:8000, WS at ws://localhost:8000/ws
+```
+
+The image bundles git and the Claude Code CLI. Your repo is bind-mounted at `/workspace`
+(the agent edits it and runs git there). See [docker-compose.yml](docker-compose.yml) and
+[backend/Dockerfile](backend/Dockerfile).
+
 ### 2. Build & embed the widget
 
 ```bash
