@@ -60,6 +60,12 @@ The image bundles git and the Claude Code CLI. Your repo is bind-mounted at `/wo
 (the agent edits it and runs git there). See [docker-compose.yml](docker-compose.yml) and
 [backend/Dockerfile](backend/Dockerfile).
 
+**Auth with your Claude subscription (no API key):** run `claude setup-token` on your host
+and put the token in `.env` as `CLAUDE_CODE_OAUTH_TOKEN` (leave `ANTHROPIC_API_KEY` empty).
+If you run the backend *directly* on a machine where you're already logged into Claude Code,
+no token is needed — the CLI reuses your login automatically (just keep `ANTHROPIC_API_KEY`
+unset so it doesn't fall back to API billing).
+
 ### 2. Build & embed the widget
 
 ```bash

@@ -18,7 +18,11 @@ services:
       AGENTBRIDGE_HOST: 0.0.0.0
       AGENTBRIDGE_PORT: 8000
       AGENTBRIDGE_AGENT: ${AGENTBRIDGE_AGENT:-claude-code}
-      # Credentials (set in .env). Empty values are harmless if unused.
+      # Claude Code auth — use EITHER your Claude subscription OR an API key:
+      #  - Subscription: run `claude setup-token` on the host and put the result in
+      #    CLAUDE_CODE_OAUTH_TOKEN (no per-token API billing).
+      #  - API billing: set ANTHROPIC_API_KEY. If both are set, the API key wins.
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     volumes:
