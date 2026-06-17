@@ -21,7 +21,7 @@ from pydantic import ValidationError
 
 from . import __version__, protocol as P
 from .config import get_settings
-from .sessions import Session
+from .sessions import ChatHub
 
 app = FastAPI(title="AgentBridge", version=__version__)
 
@@ -63,7 +63,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
             await websocket.send_text(json.dumps(message.model_dump()))
 
     try:
-        session = Session(settings.workspace, send, settings.github_token)
+        hub = ChatHub(settings.workspace, send, settings.github_token)
     except Exception as exc:  # noqa: BLE001 — e.g. workspace is not a git repo
         await send(P.ErrorMessage(message=str(exc)))
         await websocket.close()
@@ -73,7 +73,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
 
     async def dispatch(msg: P.ClientMessage) -> None:
         try:
-            await session.handle(msg)
+            await hub.handle(msg)
         except Exception as exc:  # noqa: BLE001 — never let one handler kill the connection
             await send(P.ErrorMessage(message=f"Handler error: {exc}"))
 
@@ -96,7 +96,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     finally:
         for task in tasks:
             task.cancel()
-        await session.close()
+        await hub.close()
 
 
 # Serve the built widget bundle (if present) at /widget for easy embedding/testing.

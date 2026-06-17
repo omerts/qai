@@ -4,6 +4,12 @@ Every message is a JSON object with a ``type`` discriminator. Client→server me
 are parsed via :func:`parse_client_message`; server→client messages are Pydantic models
 that serialize with ``.model_dump()``.
 
+A single connection multiplexes several **chats**: most messages carry a ``chat_id`` so
+the server routes them to the right chat session and the widget renders them in the right
+conversation. Connection-level messages (``list_agents``, ``list_chats``, ``start_session``,
+``open_chat``, ``delete_chat``) have no ``chat_id`` (or, for ``open_chat``/``delete_chat``,
+name the chat directly).
+
 Keep this file in sync with ``widget/src/agentbridge-widget.js`` — it is the contract.
 """
 
@@ -30,6 +36,14 @@ class FileChange(BaseModel):
     status: str  # porcelain code: M, A, D, R, ??, ...
 
 
+class ChatMeta(BaseModel):
+    id: str
+    title: str
+    agent: str
+    updated_at: str
+    message_count: int
+
+
 # --------------------------------------------------------------------------- #
 # Client -> server
 # --------------------------------------------------------------------------- #
@@ -39,48 +53,74 @@ class ListAgents(BaseModel):
     type: Literal["list_agents"]
 
 
+class ListChats(BaseModel):
+    type: Literal["list_chats"]
+
+
 class StartSession(BaseModel):
+    """Create and open a brand-new chat with the given agent."""
+
     type: Literal["start_session"]
     agent: str
     title: str | None = None
 
 
+class OpenChat(BaseModel):
+    """Reopen an existing chat: replay its transcript and resume the agent."""
+
+    type: Literal["open_chat"]
+    chat_id: str
+
+
+class DeleteChat(BaseModel):
+    type: Literal["delete_chat"]
+    chat_id: str
+
+
 class UserMessage(BaseModel):
     type: Literal["user_message"]
+    chat_id: str
     text: str
-    # Optional browser context the widget collects to help the agent: current route,
-    # framework + version, components on the page, and a user-selected element. Free-form
-    # so the widget can enrich it without a protocol bump; the server formats it into a
-    # readable preamble prepended to the agent prompt.
+    # Optional browser context the widget collects (route, framework, components, a picked
+    # element). Free-form; the server formats it into a preamble for the agent.
     context: dict | None = None
 
 
 class AgentResponse(BaseModel):
     type: Literal["agent_response"]
+    chat_id: str
     request_id: str
     answer: str
 
 
 class CreateBranch(BaseModel):
     type: Literal["create_branch"]
+    chat_id: str
     name: str | None = None
     base_branch: str | None = None
 
 
 class CreatePR(BaseModel):
     type: Literal["create_pr"]
+    chat_id: str
     title: str
     body: str | None = None
 
 
 class EndSession(BaseModel):
+    """Free a chat's in-memory session (its persisted history is kept)."""
+
     type: Literal["end_session"]
+    chat_id: str | None = None
 
 
 ClientMessage = Annotated[
     Union[
         ListAgents,
+        ListChats,
         StartSession,
+        OpenChat,
+        DeleteChat,
         UserMessage,
         AgentResponse,
         CreateBranch,
@@ -112,21 +152,45 @@ class Agents(ServerMessage):
     agents: list[AgentInfo]
 
 
+class Chats(ServerMessage):
+    type: Literal["chats"] = "chats"
+    chats: list[ChatMeta]
+
+
 class SessionStarted(ServerMessage):
     type: Literal["session_started"] = "session_started"
-    session_id: str
+    chat_id: str
     agent: str
+    title: str | None = None
     branch: str  # current HEAD — no new branch is created at session start
+
+
+class ChatHistory(ServerMessage):
+    """The persisted transcript + state of a reopened chat, for the widget to replay."""
+
+    type: Literal["chat_history"] = "chat_history"
+    chat_id: str
+    entries: list[dict]
+    files: list[FileChange] = Field(default_factory=list)
+    branch: str | None = None
+    target_branch: str | None = None
+
+
+class ChatDeleted(ServerMessage):
+    type: Literal["chat_deleted"] = "chat_deleted"
+    chat_id: str
 
 
 class AgentChunk(ServerMessage):
     type: Literal["agent_chunk"] = "agent_chunk"
+    chat_id: str
     text: str
     stream: Literal["stdout", "stderr", "thinking"] = "stdout"
 
 
 class AgentPrompt(ServerMessage):
     type: Literal["agent_prompt"] = "agent_prompt"
+    chat_id: str
     request_id: str
     prompt: str
     # When present, the widget renders one button per option (e.g. ["Allow", "Deny"])
@@ -136,34 +200,40 @@ class AgentPrompt(ServerMessage):
 
 class BranchSuggested(ServerMessage):
     type: Literal["branch_suggested"] = "branch_suggested"
+    chat_id: str
     suggested_name: str
     reason: str
 
 
 class BranchCreated(ServerMessage):
     type: Literal["branch_created"] = "branch_created"
+    chat_id: str
     branch: str
-    # Absolute path of the isolated git worktree the agent now operates in. The user's
-    # workspace path (where their dev server runs) keeps its original branch untouched.
+    # Absolute path of the worktree the branch was committed to (set at PR time). The user's
+    # workspace path keeps its original branch untouched.
     worktree_path: str | None = None
 
 
 class FileChanges(ServerMessage):
     type: Literal["file_changes"] = "file_changes"
+    chat_id: str
     files: list[FileChange]
 
 
 class PRCreated(ServerMessage):
     type: Literal["pr_created"] = "pr_created"
+    chat_id: str
     url: str
     number: int | None = None
 
 
 class Status(ServerMessage):
     type: Literal["status"] = "status"
+    chat_id: str
     state: str  # idle | thinking | working | done
 
 
 class ErrorMessage(ServerMessage):
     type: Literal["error"] = "error"
     message: str
+    chat_id: str | None = None

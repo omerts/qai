@@ -32,6 +32,9 @@ class SessionContext:
 
     session_id: str
     title: str | None = None
+    #: Agent-native handle to resume a prior conversation (Claude session id / Cursor chat
+    #: id), or None to start fresh. Adapters that can't resume ignore it.
+    resume: str | None = None
 
 
 EventKind = Literal["chunk", "prompt", "file_touched", "done", "error"]
@@ -118,6 +121,14 @@ class AgentAdapter(ABC):
         Only meaningful for adapters whose ``capabilities().interactive`` is True (they
         emit ``AgentEvent.prompt`` mid-run and block until answered). The default is a
         no-op so non-interactive adapters need not implement it.
+        """
+        return None
+
+    def resume_handle(self) -> str | None:
+        """The agent-native id needed to resume this conversation later, if any.
+
+        The session persists this so reopening the chat can continue with full context
+        (passed back via :attr:`SessionContext.resume`). Default None = not resumable.
         """
         return None
 

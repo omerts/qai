@@ -51,6 +51,8 @@ class ClaudeCodeAdapter(AgentAdapter):
         self._client: Any = None
         self._pending: dict[str, asyncio.Future] = {}
         self._queue: asyncio.Queue[AgentEvent] | None = None
+        self._resume: str | None = None   # session id to resume from (set at start)
+        self._session_id: str | None = None  # latest session id seen (for persistence)
 
     @classmethod
     def is_available(cls) -> bool:
@@ -60,12 +62,16 @@ class ClaudeCodeAdapter(AgentAdapter):
         return Capabilities(streaming=True, interactive=True, edits_files=True)
 
     async def start(self, ctx: SessionContext) -> None:
+        self._resume = ctx.resume
+        self._session_id = ctx.resume
         self._client = self._make_client()
         await self._client.connect()
 
     def _make_client(self) -> Any:
         if self.client_factory is not None:
-            return self.client_factory(workspace=self.workspace, can_use_tool=self._can_use_tool)
+            return self.client_factory(
+                workspace=self.workspace, can_use_tool=self._can_use_tool, resume=self._resume
+            )
 
         if not _sdk_installed():
             raise RuntimeError("claude-code-sdk is not installed. Run: pip install claude-code-sdk")
@@ -76,8 +82,12 @@ class ClaudeCodeAdapter(AgentAdapter):
             cwd=str(self.workspace),
             permission_mode="default",  # 'default' => edits/bash route through can_use_tool
             can_use_tool=self._can_use_tool,
+            resume=self._resume,  # continue a prior conversation when reopening a chat
         )
         return ClaudeSDKClient(options=options)
+
+    def resume_handle(self) -> str | None:
+        return self._session_id
 
     # ------------------------------------------------------------------ #
     # Interactive permission callback
@@ -137,6 +147,10 @@ class ClaudeCodeAdapter(AgentAdapter):
             try:
                 await self._client.query(text)
                 async for message in self._client.receive_response():
+                    # Capture the session id so the chat can be resumed later.
+                    sid = getattr(message, "session_id", None)
+                    if sid:
+                        self._session_id = sid
                     async for event in self._translate(message):
                         await queue.put(event)
             except Exception as exc:  # noqa: BLE001

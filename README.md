@@ -48,6 +48,7 @@ Configuration (all optional, via env vars):
 | `AGENTBRIDGE_HOST`       | `127.0.0.1`   | Bind host                                |
 | `AGENTBRIDGE_PORT`       | `8000`        | Bind port                                |
 | `AGENTBRIDGE_WORKTREE_DIR`| `<repo>/../.agentbridge-worktrees` | Where branch worktrees are created |
+| `AGENTBRIDGE_STATE_DIR`  | `~/.agentbridge` | Where chat history is persisted (per workspace) |
 | `GITHUB_TOKEN`/`GH_TOKEN`| —             | PR creation (falls back to `gh auth token`) |
 
 ### Run with Docker (alternative to step 1)
@@ -126,6 +127,25 @@ opens the PR. After that the workspace returns to a clean state on its original 
 > Worktrees are created lazily at PR time under `AGENTBRIDGE_WORKTREE_DIR` (default: a
 > `.agentbridge-worktrees` folder beside your repo; a persistent `/worktrees` volume in
 > Docker). Because the agent works in the workspace, its conversation is never reset.
+
+### Multiple chats & history
+
+The widget runs many chats over one connection. Use **+** to start a chat and **☰** to
+browse, reopen, or delete previous ones. State is persisted on the backend under
+`AGENTBRIDGE_STATE_DIR` (per workspace), so:
+
+- Your **selected agent** and **last open chat** are restored after a page refresh
+  (kept in the browser's `localStorage`).
+- Chat **transcripts** survive refreshes and server restarts, and are replayed when you
+  reopen a chat.
+- Reopening a chat **resumes the agent's context** — Claude via its `resume` session id,
+  Cursor via `--resume` — so it continues where it left off rather than starting cold.
+  (Resuming needs the agent CLI's own stored conversation; in Docker that's kept on the
+  `agentbridge-claude-home` volume. If it can't be resumed, the chat continues fresh and
+  says so.)
+
+Because every chat edits the same workspace, agent turns are **serialized** — only one runs
+at a time across all chats.
 
 ### What the agent sees (page context)
 

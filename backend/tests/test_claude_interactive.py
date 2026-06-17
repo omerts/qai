@@ -57,7 +57,7 @@ class FakeClient:
 
 async def _drive(answer: str):
     ClaudeCodeAdapter.client_factory = staticmethod(
-        lambda workspace, can_use_tool: FakeClient(workspace, can_use_tool)
+        lambda workspace, can_use_tool, resume=None: FakeClient(workspace, can_use_tool)
     )
     try:
         adapter = ClaudeCodeAdapter(Path("."))

@@ -96,6 +96,8 @@ def client(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("AGENTBRIDGE_WORKSPACE", str(tmp_path))
     # Keep agent worktrees out of the repo (and out of other tests' way).
     monkeypatch.setenv("AGENTBRIDGE_WORKTREE_DIR", str(tmp_path.parent / "agentbridge-wt"))
+    # Persist chat history to a temp dir, not the real ~/.agentbridge.
+    monkeypatch.setenv("AGENTBRIDGE_STATE_DIR", str(tmp_path.parent / "agentbridge-state"))
     config.get_settings.cache_clear()
     config.github_token.cache_clear()
     monkeypatch.setattr(config.Settings, "github_token", property(lambda self: "fake-token"))
@@ -136,16 +138,18 @@ def test_full_session_flow(client):
         ws.send_json({"type": "start_session", "agent": "fake", "title": "add feature"})
         started = _recv_until(ws, "session_started")
         assert started["branch"] == "main"
+        chat_id = started["chat_id"]
 
-        ws.send_json({"type": "user_message", "text": "add a feature"})
+        ws.send_json({"type": "user_message", "chat_id": chat_id, "text": "add a feature"})
         suggested = _recv_until(ws, "branch_suggested")
         assert "agentbridge/" in suggested["suggested_name"]
+        assert suggested["chat_id"] == chat_id
         # File the agent created is really on disk.
         assert (repo / "feature.txt").exists()
 
         # User chooses a branch. Nothing is checked out yet — the agent's edits stay live
         # in the workspace (so the dev server's hot reload keeps showing them).
-        ws.send_json({"type": "create_branch", "name": suggested["suggested_name"]})
+        ws.send_json({"type": "create_branch", "chat_id": chat_id, "name": suggested["suggested_name"]})
         created = _recv_until(ws, "branch_created")
         assert created["branch"].startswith("agentbridge/")
         assert created["worktree_path"] is None
@@ -153,7 +157,7 @@ def test_full_session_flow(client):
 
         # Open a PR: now the branch worktree is created and the edits are committed onto it,
         # leaving the workspace branch untouched and its tree clean.
-        ws.send_json({"type": "create_pr", "title": "Add feature"})
+        ws.send_json({"type": "create_pr", "chat_id": chat_id, "title": "Add feature"})
         pr = _recv_until(ws, "pr_created")
         assert pr["url"].endswith("/pull/7")
         assert pr["number"] == 7
@@ -166,15 +170,56 @@ def test_interactive_prompt_round_trip(client):
     tc, repo = client
     with tc.websocket_connect("/ws") as ws:
         ws.send_json({"type": "start_session", "agent": "ifake"})
-        _recv_until(ws, "session_started")
+        started = _recv_until(ws, "session_started")
+        chat_id = started["chat_id"]
 
-        ws.send_json({"type": "user_message", "text": "edit app.py"})
+        ws.send_json({"type": "user_message", "chat_id": chat_id, "text": "edit app.py"})
         prompt = _recv_until(ws, "agent_prompt")
         assert prompt["options"] == ["Allow", "Deny"]
 
         # Reply while the agent turn is still blocked awaiting this answer.
-        ws.send_json({"type": "agent_response", "request_id": prompt["request_id"], "answer": "Allow"})
+        ws.send_json({"type": "agent_response", "chat_id": chat_id,
+                      "request_id": prompt["request_id"], "answer": "Allow"})
 
         # The turn resumes, the file is written, and we return to idle.
         _recv_until(ws, "file_changes")
         assert (repo / "app.py").exists()
+
+
+def test_chat_persistence_and_resume(client):
+    """Chats persist across connections: list, reopen with replayed history + resume id."""
+    tc, repo = client
+    with tc.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "start_session", "agent": "fake", "title": "first"})
+        chat_id = _recv_until(ws, "session_started")["chat_id"]
+        ws.send_json({"type": "user_message", "chat_id": chat_id, "text": "do a thing"})
+        _recv_until(ws, "status")  # let the turn run to idle
+        _drain_idle(ws, chat_id)
+
+    # New connection (simulates a page refresh): the chat is still listed.
+    with tc.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "list_chats"})
+        chats = _recv_until(ws, "chats")["chats"]
+        assert any(c["id"] == chat_id and c["title"] == "first" for c in chats)
+
+        # Reopen it: the persisted transcript is replayed.
+        ws.send_json({"type": "open_chat", "chat_id": chat_id})
+        _recv_until(ws, "session_started")
+        history = _recv_until(ws, "chat_history")
+        kinds = [e["kind"] for e in history["entries"]]
+        assert "user" in kinds and "agent" in kinds
+
+        # Delete it.
+        ws.send_json({"type": "delete_chat", "chat_id": chat_id})
+        deleted = _recv_until(ws, "chat_deleted")
+        assert deleted["chat_id"] == chat_id
+        remaining = {c["id"] for c in _recv_until(ws, "chats")["chats"]}
+        assert chat_id not in remaining
+
+
+def _drain_idle(ws, chat_id, limit=30):
+    for _ in range(limit):
+        msg = ws.receive_json()
+        if msg["type"] == "status" and msg.get("state") == "idle":
+            return
+    raise AssertionError("turn did not reach idle")

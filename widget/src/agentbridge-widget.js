@@ -9,6 +9,10 @@
  * Everything renders inside a Shadow DOM, so the host app's CSS cannot leak in and the
  * widget's CSS cannot leak out. This file is the contract's client side — keep message
  * types in sync with backend/agentbridge/protocol.py.
+ *
+ * One connection multiplexes multiple chats: the widget keeps a chat list, persists the
+ * selected agent + active chat in localStorage (so a refresh restores them), and replays a
+ * chat's transcript from the server when reopened.
  */
 (function () {
   "use strict";
@@ -20,6 +24,12 @@
   var ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
   // Crosshair "select element" icon (devtools-style inspector).
   var INSPECT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="4"/></svg>';
+
+  var LS_AGENT = "agentbridge:agent";
+  var LS_CHAT = "agentbridge:activeChat";
+
+  function lsGet(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { window.localStorage.setItem(k, v); } catch (e) {} }
 
   function h(tag, attrs, children) {
     var el = document.createElement(tag);
@@ -40,12 +50,18 @@
     this.scriptSrc = opts.scriptSrc || null;
     this.ws = null;
     this.connected = false;
+    this.agents = [];
+    this.chats = [];
+    this.activeChatId = null;
+    this.selectedAgent = lsGet(LS_AGENT) || null;
     this.sessionAgent = null;
     this.branch = null;
+    this.targetBranch = null;
     this.currentAgentMsg = null; // accumulating agent bubble for the active turn
     this.reconnectDelay = 1000;
     this.pendingElement = null;  // element picked via the inspector, attached to next msg
     this._inspecting = false;
+    this._autoOpened = false;
     this._init();
   }
 
@@ -80,20 +96,26 @@
     this.bubble.innerHTML = ICON;
     this.bubble.addEventListener("click", function () { self._toggle(true); });
 
-    // Panel
+    // Header: menu (chat list) · title · status · new chat · close
     this.statusDot = h("span", { class: "ab-status-dot" });
+    this.menuBtn = h("button", { class: "ab-iconbtn", title: "Chats", text: "☰" });
+    this.menuBtn.addEventListener("click", function () { self._toggleDrawer(); });
+    this.newBtn = h("button", { class: "ab-iconbtn", title: "New chat", text: "+" });
+    this.newBtn.addEventListener("click", function () { self._newChat(); });
     var closeBtn = h("button", { class: "ab-iconbtn", title: "Close", text: "✕" });
     closeBtn.addEventListener("click", function () { self._toggle(false); });
     var header = h("div", { class: "ab-header" }, [
+      this.menuBtn,
       this.statusDot,
       h("span", { class: "ab-title", text: "Coding Agent" }),
+      this.newBtn,
       closeBtn,
     ]);
 
-    // Controls: agent picker + branch button
-    this.agentSelect = h("select", { class: "ab-select", title: "Choose an agent" });
-    this.agentSelect.addEventListener("change", function () { self._startSession(); });
-    this.branchBtn = h("button", { class: "ab-btn", text: "Branch" , title: "Choose the branch this work commits to (created at PR time; your workspace branch is untouched)"});
+    // Controls: agent picker + branch + PR + inspect
+    this.agentSelect = h("select", { class: "ab-select", title: "Default agent for new chats" });
+    this.agentSelect.addEventListener("change", function () { self._selectAgent(); });
+    this.branchBtn = h("button", { class: "ab-btn", text: "Branch", title: "Choose the branch this work commits to (created at PR time; your workspace branch is untouched)" });
     this.branchBtn.addEventListener("click", function () { self._requestBranch(); });
     this.prBtn = h("button", { class: "ab-btn", text: "Create PR", title: "Commit, push and open a pull request" });
     this.prBtn.addEventListener("click", function () { self._createPR(); });
@@ -108,10 +130,20 @@
     // Messages
     this.messages = h("div", { class: "ab-messages" });
 
+    // Chat-list drawer (overlays the messages area when open)
+    this.drawerList = h("div", { class: "ab-drawer-list" });
+    this.drawer = h("div", { class: "ab-drawer" }, [
+      h("div", { class: "ab-drawer-head", text: "Chats" }),
+      this.drawerList,
+    ]);
+
     // Changed files
     this.filesHead = h("div", { class: "ab-files-head" });
     this.filesList = h("div");
     this.files = h("div", { class: "ab-files" }, [this.filesHead, this.filesList]);
+
+    // Pending attached-element chip
+    this.contextBar = h("div", { class: "ab-context-bar" });
 
     // Composer
     this.input = h("textarea", { class: "ab-input", rows: "1", placeholder: "Describe a change…" });
@@ -122,15 +154,14 @@
     this.sendBtn.addEventListener("click", function () { self._sendMessage(); });
     var composer = h("div", { class: "ab-composer" }, [this.input, this.sendBtn]);
 
-    // Pending attached-element chip (populated by the inspector), sits above the composer.
-    this.contextBar = h("div", { class: "ab-context-bar" });
-
-    var panel = h("div", { class: "ab-panel" }, [header, controls, this.messages, this.files, this.contextBar, composer]);
+    var body = h("div", { class: "ab-body" }, [this.messages, this.drawer]);
+    var panel = h("div", { class: "ab-panel" }, [header, controls, body, this.files, this.contextBar, composer]);
     this.root.appendChild(this.bubble);
     this.root.appendChild(panel);
     this.shadow.appendChild(this.root);
 
-    this._setControlsEnabled(false);
+    this._setConnected(false);
+    this._setChatActive(false);
   };
 
   AgentBridgeWidget.prototype._toggle = function (open) {
@@ -138,6 +169,12 @@
     if (open) this.input.focus();
     else if (this._inspecting) this._stopInspect();
   };
+
+  AgentBridgeWidget.prototype._toggleDrawer = function (force) {
+    var open = force === undefined ? !this.drawer.classList.contains("open") : force;
+    this.drawer.classList.toggle("open", open);
+  };
+  AgentBridgeWidget.prototype._closeDrawer = function () { this._toggleDrawer(false); };
 
   // ---- WebSocket -------------------------------------------------------- //
 
@@ -153,7 +190,10 @@
       self.connected = true;
       self.reconnectDelay = 1000;
       self.statusDot.classList.add("connected");
+      self._setConnected(true);
+      self._autoOpened = false;
       self._send({ type: "list_agents" });
+      self._send({ type: "list_chats" });
     });
     this.ws.addEventListener("message", function (ev) {
       var msg;
@@ -163,8 +203,7 @@
     this.ws.addEventListener("close", function () {
       self.connected = false;
       self.statusDot.classList.remove("connected", "working");
-      self._setControlsEnabled(false);
-      // Auto-reconnect with backoff.
+      self._setConnected(false);
       setTimeout(function () { self._connect(); }, self.reconnectDelay);
       self.reconnectDelay = Math.min(self.reconnectDelay * 2, 15000);
     });
@@ -175,85 +214,208 @@
     if (this.ws && this.connected) this.ws.send(JSON.stringify(obj));
   };
 
+  // Only render live messages that belong to the chat currently on screen.
+  AgentBridgeWidget.prototype._isActive = function (msg) {
+    return msg.chat_id && msg.chat_id === this.activeChatId;
+  };
+
   AgentBridgeWidget.prototype._onMessage = function (msg) {
     switch (msg.type) {
       case "agents": return this._onAgents(msg.agents);
-      case "session_started":
-        this.sessionAgent = msg.agent;
-        this.branch = msg.branch;
-        this._updateBranchLabel();
-        this._setControlsEnabled(true);
-        this._system("Session started with " + msg.agent + " on " + msg.branch);
-        return;
-      case "agent_chunk": return this._onChunk(msg);
-      case "agent_prompt": return this._onPrompt(msg);
-      case "branch_suggested": return this._onBranchSuggested(msg);
+      case "chats": return this._onChats(msg.chats);
+      case "session_started": return this._onSessionStarted(msg);
+      case "chat_history": return this._onChatHistory(msg);
+      case "chat_deleted": return this._onChatDeleted(msg);
+      case "agent_chunk": return this._isActive(msg) && this._onChunk(msg);
+      case "agent_prompt": return this._isActive(msg) && this._onPrompt(msg);
+      case "branch_suggested": return this._isActive(msg) && this._onBranchSuggested(msg);
       case "branch_created":
-        this.branch = msg.branch; this._updateBranchLabel();
+        if (!this._isActive(msg)) return;
+        this.branch = msg.branch; this.targetBranch = msg.branch; this._updateBranchLabel();
         if (msg.worktree_path) {
-          // PR time: the branch now exists on disk and the edits were committed to it.
           this._system("Committed your changes to " + msg.branch
             + "\nWorkspace branch untouched; worktree: " + msg.worktree_path);
         } else {
-          // Branch chosen: nothing checked out yet — edits stay live in the workspace.
           this._system("Target branch set: " + msg.branch
             + "\nYour edits stay live in the app and commit here when you open a PR.");
         }
         return;
-      case "file_changes": return this._onFileChanges(msg.files);
-      case "pr_created":
-        this._prLink(msg.url, msg.number);
-        return;
-      case "status": return this._onStatus(msg.state);
-      case "error": return this._addMsg("error", msg.message);
+      case "file_changes": return this._isActive(msg) && this._onFileChanges(msg.files);
+      case "pr_created": return this._isActive(msg) && this._prLink(msg.url, msg.number);
+      case "status": return this._isActive(msg) && this._onStatus(msg.state);
+      case "error":
+        if (msg.chat_id && msg.chat_id !== this.activeChatId) return;
+        return this._addMsg("error", msg.message);
     }
   };
 
+  // ---- Agents + chat list ----------------------------------------------- //
+
   AgentBridgeWidget.prototype._onAgents = function (agents) {
     var self = this;
+    this.agents = agents || [];
     this.agentSelect.innerHTML = "";
     var placeholder = h("option", { value: "", text: "Choose agent…" });
-    placeholder.disabled = true; placeholder.selected = true;
+    placeholder.disabled = true;
     this.agentSelect.appendChild(placeholder);
-    agents.forEach(function (a) {
+    var restored = false;
+    this.agents.forEach(function (a) {
       var opt = h("option", { value: a.name, text: a.label + (a.available ? "" : " (unavailable)") });
       if (!a.available) opt.disabled = true;
       self.agentSelect.appendChild(opt);
+      if (a.name === self.selectedAgent && a.available) { opt.selected = true; restored = true; }
     });
+    if (!restored) { placeholder.selected = true; this.selectedAgent = null; }
+  };
+
+  AgentBridgeWidget.prototype._onChats = function (chats) {
+    this.chats = chats || [];
+    this._renderChatList();
+    // After a refresh, reopen the chat the user was last in (once per connection).
+    if (!this._autoOpened) {
+      this._autoOpened = true;
+      var want = lsGet(LS_CHAT);
+      var exists = want && this.chats.some(function (c) { return c.id === want; });
+      if (exists) this._openChat(want);
+      else if (!this.activeChatId) this._showEmptyState();
+    }
+  };
+
+  AgentBridgeWidget.prototype._renderChatList = function () {
+    var self = this;
+    this.drawerList.innerHTML = "";
+    if (!this.chats.length) {
+      this.drawerList.appendChild(h("div", { class: "ab-drawer-empty", text: "No chats yet." }));
+      return;
+    }
+    this.chats.forEach(function (c) {
+      var item = h("div", { class: "ab-chat-item" + (c.id === self.activeChatId ? " active" : "") });
+      var main = h("div", { class: "ab-chat-main" }, [
+        h("div", { class: "ab-chat-title", text: c.title || "New chat" }),
+        h("div", { class: "ab-chat-meta", text: c.agent + " · " + c.message_count + " msg" }),
+      ]);
+      main.addEventListener("click", function () { self._openChat(c.id); });
+      var del = h("button", { class: "ab-chat-del", title: "Delete chat", text: "🗑" });
+      del.addEventListener("click", function (e) { e.stopPropagation(); self._deleteChat(c.id); });
+      item.appendChild(main);
+      item.appendChild(del);
+      self.drawerList.appendChild(item);
+    });
+  };
+
+  // ---- Chat lifecycle --------------------------------------------------- //
+
+  AgentBridgeWidget.prototype._selectAgent = function () {
+    this.selectedAgent = this.agentSelect.value || null;
+    if (this.selectedAgent) lsSet(LS_AGENT, this.selectedAgent);
+    // First-run convenience: if nothing is open yet, start a chat right away.
+    if (this.selectedAgent && !this.activeChatId) this._newChat();
+  };
+
+  AgentBridgeWidget.prototype._newChat = function () {
+    if (!this.selectedAgent) {
+      this._toggleDrawer(false);
+      this._system("Pick an agent above, then press + to start a chat.");
+      this.agentSelect.focus();
+      return;
+    }
+    this._send({ type: "start_session", agent: this.selectedAgent });
+  };
+
+  AgentBridgeWidget.prototype._openChat = function (chatId) {
+    if (chatId === this.activeChatId) { this._closeDrawer(); return; }
+    this._send({ type: "open_chat", chat_id: chatId });
+  };
+
+  AgentBridgeWidget.prototype._deleteChat = function (chatId) {
+    this._send({ type: "delete_chat", chat_id: chatId });
+  };
+
+  AgentBridgeWidget.prototype._onSessionStarted = function (msg) {
+    this.activeChatId = msg.chat_id;
+    this.sessionAgent = msg.agent;
+    this.branch = msg.branch;
+    this.targetBranch = null;
+    lsSet(LS_CHAT, msg.chat_id);
+    this._resetChatView();
+    this._updateBranchLabel();
+    this._setChatActive(true);
+    this._closeDrawer();
+    this._renderChatList();
+  };
+
+  AgentBridgeWidget.prototype._onChatHistory = function (msg) {
+    if (msg.chat_id !== this.activeChatId) return;
+    var self = this;
+    this._resetChatView();
+    (msg.entries || []).forEach(function (e) { self._renderEntry(e); });
+    if (msg.target_branch) this.targetBranch = msg.target_branch;
+    this.branch = msg.target_branch || msg.branch || this.branch;
+    this._updateBranchLabel();
+    this._onFileChanges(msg.files || []);
+  };
+
+  AgentBridgeWidget.prototype._renderEntry = function (e) {
+    switch (e.kind) {
+      case "user": return this._addMsg("user", e.text || "");
+      case "agent": return this._addMsg("agent", e.text || "");
+      case "system": return this._system(e.text || "");
+      case "branch":
+        return this._system(e.worktree_path
+          ? "Committed to " + e.branch + " (" + e.worktree_path + ")"
+          : "Target branch: " + e.branch);
+      case "pr": return this._prLink(e.url, e.number);
+    }
+  };
+
+  AgentBridgeWidget.prototype._onChatDeleted = function (msg) {
+    if (msg.chat_id === this.activeChatId) {
+      this.activeChatId = null;
+      this.sessionAgent = null;
+      if (lsGet(LS_CHAT) === msg.chat_id) lsSet(LS_CHAT, "");
+      this._resetChatView();
+      this._setChatActive(false);
+      this._showEmptyState();
+    }
+  };
+
+  AgentBridgeWidget.prototype._showEmptyState = function () {
+    this.messages.innerHTML = "";
+    var hint = this.chats.length
+      ? "Open a previous chat from ☰, or press + for a new one."
+      : "Pick an agent above and press + to start a chat.";
+    this.messages.appendChild(h("div", { class: "ab-empty", text: hint }));
   };
 
   // ---- Actions ---------------------------------------------------------- //
 
-  AgentBridgeWidget.prototype._startSession = function () {
-    var agent = this.agentSelect.value;
-    if (!agent) return;
-    this.messages.innerHTML = "";
-    this._send({ type: "start_session", agent: agent });
-  };
-
   AgentBridgeWidget.prototype._sendMessage = function () {
     var text = this.input.value.trim();
     if (!text) return;
-    if (!this.sessionAgent) { this._system("Pick an agent to start a session first."); return; }
+    if (!this.activeChatId) { this._newChatHint(); return; }
     this._addMsg("user", text);
     this.input.value = "";
     this.currentAgentMsg = null;
-    // Attach browser context (route, framework, components) + any picked element so the
-    // agent understands what the user is looking at.
     var context = { page: this._collectPageContext() };
     if (this.pendingElement) context.element = this.pendingElement;
-    this._send({ type: "user_message", text: text, context: context });
+    this._send({ type: "user_message", chat_id: this.activeChatId, text: text, context: context });
     this._clearPendingElement();
   };
 
+  AgentBridgeWidget.prototype._newChatHint = function () {
+    this._system("No chat open — pick an agent and press + to start one.");
+  };
+
   AgentBridgeWidget.prototype._requestBranch = function (suggestedName) {
-    this._send({ type: "create_branch", name: suggestedName || null });
+    if (!this.activeChatId) return this._newChatHint();
+    this._send({ type: "create_branch", chat_id: this.activeChatId, name: suggestedName || null });
   };
 
   AgentBridgeWidget.prototype._createPR = function () {
+    if (!this.activeChatId) return this._newChatHint();
     var title = (this.input.value.trim()) || ("AgentBridge: " + (this.sessionAgent || "session") + " changes");
     this.input.value = "";
-    this._send({ type: "create_pr", title: title });
+    this._send({ type: "create_pr", chat_id: this.activeChatId, title: title });
     this._system("Creating pull request…");
   };
 
@@ -272,17 +434,14 @@
   };
 
   AgentBridgeWidget.prototype._detectFramework = function () {
-    // Angular exposes a version attribute on its root element.
     try {
       var ng = document.querySelector("[ng-version]");
       if (ng) return { name: "Angular", version: ng.getAttribute("ng-version") };
     } catch (e) {}
-    // Vue: global, app marker, or an internal component handle on a node.
     try {
       if (window.Vue && window.Vue.version) return { name: "Vue", version: window.Vue.version };
       if (document.querySelector("[data-v-app]") || window.__VUE__) return { name: "Vue", version: null };
     } catch (e) {}
-    // React: global version, devtools hook, or a fiber/container key on a root node.
     try {
       if (window.React && window.React.version) return { name: "React", version: window.React.version };
       if (this._reactRootPresent()) return { name: "React", version: null };
@@ -305,7 +464,6 @@
   AgentBridgeWidget.prototype._collectComponents = function () {
     var seen = {}, out = [];
     function add(n) { if (n && !seen[n]) { seen[n] = 1; out.push(n); } }
-    // Custom-element tags (web components, Angular/Vue component selectors).
     try {
       var all = document.body ? document.body.getElementsByTagName("*") : [];
       for (var i = 0; i < all.length && i < 4000 && out.length < 40; i++) {
@@ -313,7 +471,6 @@
         if (tag.indexOf("-") !== -1) add(tag);
       }
     } catch (e) {}
-    // Angular component class names (sampled to stay cheap on large trees).
     try {
       if (window.ng && typeof window.ng.getComponent === "function") {
         var ngEls = document.querySelectorAll("[ng-version] *");
@@ -358,7 +515,6 @@
     document.removeEventListener("keydown", this._onKey, true);
   };
 
-  // The element under the pointer, or null if the pointer is over our own widget.
   AgentBridgeWidget.prototype._inspectTarget = function (e) {
     var path = e.composedPath ? e.composedPath() : [];
     if (path.indexOf(this.hostEl) !== -1) return null;
@@ -429,7 +585,6 @@
     return parts.join(" > ");
   };
 
-  // Best-effort: resolve the owning framework component name for a DOM node.
   AgentBridgeWidget.prototype._resolveComponent = function (el) {
     var node;
     try {
@@ -468,7 +623,6 @@
     return null;
   };
 
-  // React dev builds attach __source/_debugSource (file + line) to fibers.
   AgentBridgeWidget.prototype._sourceHint = function (el) {
     try {
       var key = Object.keys(el).find(function (k) { return k.indexOf("__reactFiber$") === 0; });
@@ -509,7 +663,7 @@
   // ---- Rendering -------------------------------------------------------- //
 
   AgentBridgeWidget.prototype._onChunk = function (msg) {
-    var cls = msg.stream === "thinking" ? "agent thinking" : "agent";
+    var cls = msg.stream === "thinking" ? "agent thinking" : (msg.stream === "stderr" ? "agent stderr" : "agent");
     if (!this.currentAgentMsg || this.currentAgentMsg._stream !== msg.stream) {
       this.currentAgentMsg = this._addMsg(cls, "");
       this.currentAgentMsg._stream = msg.stream;
@@ -521,12 +675,11 @@
   AgentBridgeWidget.prototype._onPrompt = function (msg) {
     var self = this;
     function reply(answer) {
-      self._send({ type: "agent_response", request_id: msg.request_id, answer: answer });
+      self._send({ type: "agent_response", chat_id: msg.chat_id, request_id: msg.request_id, answer: answer });
       card.remove();
     }
 
     if (msg.options && msg.options.length) {
-      // Button-per-option (e.g. Allow / Deny).
       var buttons = msg.options.map(function (opt, i) {
         var b = h("button", { class: "ab-btn" + (i === 0 ? " primary" : ""), text: opt });
         b.addEventListener("click", function () { reply(opt); });
@@ -536,7 +689,6 @@
       return;
     }
 
-    // Free-text reply.
     var input = h("input", { class: "ab-prompt-input ab-select", type: "text", placeholder: "Your answer…" });
     var send = h("button", { class: "ab-btn primary", text: "Reply" });
     send.addEventListener("click", function () { reply(input.value); });
@@ -548,7 +700,7 @@
 
   AgentBridgeWidget.prototype._onBranchSuggested = function (msg) {
     var self = this;
-    var create = h("button", { class: "ab-btn primary", text: "Create branch" });
+    var create = h("button", { class: "ab-btn primary", text: "Choose branch" });
     create.addEventListener("click", function () {
       self._requestBranch(msg.suggested_name);
       card.remove();
@@ -556,7 +708,7 @@
     var ignore = h("button", { class: "ab-btn", text: "Not now" });
     ignore.addEventListener("click", function () { card.remove(); });
     var body = h("span");
-    body.innerHTML = msg.reason + " &nbsp;<code>" + escapeHtml(msg.suggested_name) + "</code>";
+    body.innerHTML = escapeHtml(msg.reason) + " &nbsp;<code>" + escapeHtml(msg.suggested_name) + "</code>";
     var card = this._card("Branch out?", null, [create, ignore]);
     card.querySelector(".ab-card-body").appendChild(body);
   };
@@ -610,14 +762,32 @@
     return card;
   };
 
-  AgentBridgeWidget.prototype._updateBranchLabel = function () {
-    this.branchLabel.textContent = this.branch ? "⛓ " + this.branch : "";
+  AgentBridgeWidget.prototype._resetChatView = function () {
+    this.messages.innerHTML = "";
+    this.filesList.innerHTML = "";
+    this.files.classList.remove("show");
+    this.currentAgentMsg = null;
+    this._clearPendingElement();
   };
 
-  AgentBridgeWidget.prototype._setControlsEnabled = function (on) {
+  AgentBridgeWidget.prototype._updateBranchLabel = function () {
+    var b = this.targetBranch || this.branch;
+    this.branchLabel.textContent = b ? "⛓ " + b : "";
+  };
+
+  AgentBridgeWidget.prototype._setConnected = function (on) {
+    this.menuBtn.disabled = !on;
+    this.newBtn.disabled = !on;
+    this.agentSelect.disabled = !on;
+    if (!on) this._setChatActive(false);
+  };
+
+  AgentBridgeWidget.prototype._setChatActive = function (on) {
     this.branchBtn.disabled = !on;
     this.prBtn.disabled = !on;
+    this.inspectBtn.disabled = !on;
     this.sendBtn.disabled = !on;
+    this.input.disabled = !on;
   };
 
   AgentBridgeWidget.prototype._scroll = function () {
@@ -642,7 +812,6 @@
     },
   };
 
-  // Auto-init from the script tag's data-* attributes.
   var current = document.currentScript;
   if (current && current.dataset && current.dataset.server) {
     AgentBridge.init({

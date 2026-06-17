@@ -1,3 +1,4 @@
+import asyncio
 import subprocess
 from pathlib import Path
 
@@ -8,6 +9,25 @@ from agentbridge.agents.aider import AiderAdapter
 from agentbridge.agents.base import AgentAdapter, AgentEvent, Capabilities, SessionContext
 from agentbridge.agents.copilot import CopilotAdapter
 from agentbridge.sessions import Session
+from agentbridge.store import ChatStore
+
+
+async def _noop() -> None:
+    return None
+
+
+def _make_session(tmp_path: Path, send, agent: str = "fake") -> Session:
+    store = ChatStore(tmp_path)
+    record = store.create(agent=agent, title="t")
+    return Session(
+        record=record,
+        workspace=tmp_path,
+        send=send,
+        github_token=None,
+        store=store,
+        turn_lock=asyncio.Lock(),
+        notify_chats=_noop,
+    )
 
 
 def _init_repo(path: Path) -> None:
@@ -56,17 +76,18 @@ class FakeAdapter(AgentAdapter):
         pass
 
 
-async def test_session_suggests_branch_on_first_edit(tmp_path: Path):
+async def test_session_suggests_branch_on_first_edit(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("AGENTBRIDGE_STATE_DIR", str(tmp_path.parent / "state"))
     _init_repo(tmp_path)
     sent: list[P.ServerMessage] = []
 
     async def send(m: P.ServerMessage) -> None:
         sent.append(m)
 
-    session = Session(tmp_path, send, github_token=None)
-    session.adapter = FakeAdapter(tmp_path)  # bypass registry; pretend session started
+    session = _make_session(tmp_path, send)
+    session.adapter = FakeAdapter(tmp_path)  # bypass registry; pretend the adapter started
 
-    await session.handle(P.UserMessage(type="user_message", text="make a file"))
+    await session.handle(P.UserMessage(type="user_message", chat_id=session.chat_id, text="make a file"))
 
     types = [m.type for m in sent]
     assert "agent_chunk" in types
@@ -75,23 +96,27 @@ async def test_session_suggests_branch_on_first_edit(tmp_path: Path):
     # The suggestion must NOT have auto-created a branch.
     assert session.git.current_branch() == "main"
     assert "branch_created" not in types
+    # The turn was persisted to the transcript.
+    kinds = [e["kind"] for e in session.record.transcript]
+    assert "user" in kinds and "agent" in kinds
 
 
 async def test_session_create_branch_is_user_triggered(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("AGENTBRIDGE_WORKTREE_DIR", str(tmp_path.parent / "wt"))
+    monkeypatch.setenv("AGENTBRIDGE_STATE_DIR", str(tmp_path.parent / "state"))
     _init_repo(tmp_path)
     sent: list[P.ServerMessage] = []
 
     async def send(m: P.ServerMessage) -> None:
         sent.append(m)
 
-    session = Session(tmp_path, send, github_token=None)
-    await session.handle(P.CreateBranch(type="create_branch", name="agentbridge/manual"))
+    session = _make_session(tmp_path, send)
+    await session.handle(P.CreateBranch(type="create_branch", chat_id=session.chat_id, name="agentbridge/manual"))
 
     # Choosing a branch does NOT switch the workspace branch or create anything yet — the
     # branch is recorded and materialized as a worktree only at PR time.
     assert session.git.current_branch() == "main"
-    assert session.target_branch == "agentbridge/manual"
+    assert session.record.target_branch == "agentbridge/manual"
     created = [m for m in sent if m.type == "branch_created"]
     assert created and created[0].branch == "agentbridge/manual"
     assert created[0].worktree_path is None

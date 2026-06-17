@@ -54,7 +54,11 @@ class CursorAdapter(AgentAdapter):
             raise RuntimeError(
                 f"'{_BINARY}' not found on PATH. Install the Cursor CLI to use this agent."
             )
-        self._chat_id = await self._create_chat()
+        # Resume a prior chat if we have its id; otherwise mint a fresh one.
+        self._chat_id = ctx.resume or await self._create_chat()
+
+    def resume_handle(self) -> str | None:
+        return self._chat_id
 
     async def _create_chat(self) -> str | None:
         """Mint a fresh chat id via ``cursor-agent create-chat`` (best-effort)."""

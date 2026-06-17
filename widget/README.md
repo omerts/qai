@@ -47,10 +47,20 @@ Override the CSS variables on the widget host if you want to match your brand
 (`--ab-accent`, `--ab-bg`, `--ab-fg`, `--ab-radius`, …). They are defined on `:host` in
 `src/agentbridge-widget.css`.
 
+## Chats & history
+
+The widget multiplexes several chats over one WebSocket. **+** starts a new chat with the
+selected agent; **☰** opens a drawer to switch between, reopen, or delete previous chats.
+The selected agent and last-open chat are remembered in `localStorage` (restored on
+refresh); transcripts and the agent's resume id are persisted server-side, so reopening a
+chat replays its history and continues the agent's context. Each server→client message
+carries a `chat_id`; the widget renders only messages for the chat currently on screen.
+
 ## Flow
 
-1. Connect → the widget requests the agent list and populates the picker.
-2. Pick an agent → starts a session **on the current branch** (no branch is created).
+1. Connect → the widget requests the agent list and the chat list, restores your selected
+   agent, and reopens your last chat (replaying its transcript).
+2. Pick an agent + press **+** → starts a chat **on the current branch** (no branch is created).
 3. Chat → the agent's output streams in; changed files appear in the footer. If the agent
    needs approval (e.g. Claude Code wanting to edit a file), an **Allow / Deny** card appears
    and the agent waits for your answer (`agent_prompt` → `agent_response`).

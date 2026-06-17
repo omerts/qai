@@ -72,6 +72,8 @@
   background: none; border: none; cursor: pointer; color: var(--ab-muted);
   font-size: 18px; line-height: 1; padding: 4px;
 }
+.ab-iconbtn:disabled { opacity: .4; cursor: not-allowed; }
+.ab-input:disabled { opacity: .6; cursor: not-allowed; }
 
 /* Controls row (agent picker + branch) */
 .ab-controls {
@@ -113,12 +115,38 @@
   border-radius: 50%; width: 18px; height: 18px; cursor: pointer; line-height: 1; font-size: 11px;
 }
 
+/* Body wrapper holds the messages and the (overlaying) chat drawer */
+.ab-body { flex: 1; position: relative; display: flex; min-height: 0; }
+
 /* Messages */
 .ab-messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.ab-empty { margin: auto; color: var(--ab-muted); font-size: 13px; text-align: center; padding: 0 24px; }
+
+/* Chat-list drawer (slides over the messages area) */
+.ab-drawer {
+  position: absolute; inset: 0; background: var(--ab-bg);
+  display: none; flex-direction: column; z-index: 5;
+}
+.ab-drawer.open { display: flex; }
+.ab-drawer-head { padding: 10px 12px; font-weight: 600; font-size: 13px; border-bottom: 1px solid var(--ab-border); color: var(--ab-muted); }
+.ab-drawer-list { flex: 1; overflow-y: auto; }
+.ab-drawer-empty { padding: 16px 12px; color: var(--ab-muted); font-size: 13px; }
+.ab-chat-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px; border-bottom: 1px solid var(--ab-border); cursor: pointer;
+}
+.ab-chat-item:hover { background: var(--ab-surface); }
+.ab-chat-item.active { background: var(--ab-surface); border-left: 3px solid var(--ab-accent); }
+.ab-chat-main { flex: 1; min-width: 0; }
+.ab-chat-title { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ab-chat-meta { font-size: 11px; color: var(--ab-muted); }
+.ab-chat-del { border: none; background: none; cursor: pointer; color: var(--ab-muted); font-size: 13px; padding: 4px; opacity: .6; }
+.ab-chat-del:hover { opacity: 1; }
 .ab-msg { max-width: 88%; padding: 8px 11px; border-radius: 12px; font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
 .ab-msg.user { align-self: flex-end; background: var(--ab-accent); color: var(--ab-accent-fg); border-bottom-right-radius: 4px; }
 .ab-msg.agent { align-self: flex-start; background: var(--ab-surface); border-bottom-left-radius: 4px; }
 .ab-msg.agent.thinking { font-style: italic; color: var(--ab-muted); }
+.ab-msg.agent.stderr { color: #92400e; background: #fef3c7; font-size: 12px; }
 .ab-msg.error { align-self: stretch; background: #fee2e2; color: #991b1b; }
 .ab-msg.system { align-self: center; background: transparent; color: var(--ab-muted); font-size: 12px; }
 
