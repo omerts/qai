@@ -49,6 +49,7 @@ Configuration (all optional, via env vars):
 | `AGENTBRIDGE_PORT`       | `8000`        | Bind port                                |
 | `AGENTBRIDGE_WORKTREE_DIR`| `<repo>/../.agentbridge-worktrees` | Where branch worktrees are created |
 | `AGENTBRIDGE_STATE_DIR`  | `~/.agentbridge` | Where chat history is persisted (per workspace) |
+| `AGENTBRIDGE_CLAUDE_SETTING_SOURCES` | `user,project,local` | Which Claude Code settings to load from disk (empty = CLI default) |
 | `GITHUB_TOKEN`/`GH_TOKEN`| —             | PR creation (falls back to `gh auth token`) |
 
 ### Run with Docker (alternative to step 1)
@@ -112,6 +113,22 @@ only affects Claude Code (Cursor is already headless).
 Each agent implements the `AgentAdapter` contract in
 [`backend/agentbridge/agents/base.py`](backend/agentbridge/agents/base.py). Add a new agent
 by writing one adapter and registering it in `agents/registry.py`.
+
+**Workspace settings.** Agents run in your workspace and honor its own configuration, so the
+rules/permissions/tools/MCP servers you've already set up apply:
+
+- **Claude Code** loads the workspace's `.claude/settings.json`, `.claude/settings.local.json`,
+  `.mcp.json`, hooks, custom agents, and `CLAUDE.md`, plus your user settings in `~/.claude`.
+  (In SDK/`--print` mode the CLI doesn't read filesystem settings unless asked, so AgentBridge
+  passes `--setting-sources user,project,local`. Tune via `AGENTBRIDGE_CLAUDE_SETTING_SOURCES`
+  — e.g. `project,local` to ignore your global user settings, or empty for the CLI default.)
+  Permission rules in those settings are applied first; the widget's Allow/Deny card only
+  appears for actions the settings don't already decide.
+- **Cursor** runs in the workspace too, so it picks up `.cursor/rules`, `.cursorrules`, and
+  `AGENTS.md` automatically.
+
+> In Docker, the workspace's `.claude`/`.cursor` come from the bind-mounted repo; the `user`
+> source reads `/root/.claude` (the `agentbridge-claude-home` volume).
 
 ## Workflow
 

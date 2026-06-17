@@ -186,3 +186,58 @@ async def test_auto_approve_off_prompts_for_edits():
     await adapter.resolve_prompt(event.request_id, "Allow")
     decision = await task
     assert decision.behavior == "allow"
+
+
+def test_setting_sources_default_and_env(monkeypatch):
+    from agentbridge.agents.claude_code import _setting_sources
+
+    monkeypatch.delenv("AGENTBRIDGE_CLAUDE_SETTING_SOURCES", raising=False)
+    assert _setting_sources() == "user,project,local"
+
+    monkeypatch.setenv("AGENTBRIDGE_CLAUDE_SETTING_SOURCES", "project")
+    assert _setting_sources() == "project"
+
+    # Empty -> None: fall back to the CLI's own default.
+    monkeypatch.setenv("AGENTBRIDGE_CLAUDE_SETTING_SOURCES", "   ")
+    assert _setting_sources() is None
+
+
+def test_make_client_loads_workspace_settings(monkeypatch):
+    """The real-client path must tell the CLI to load workspace settings, rooted at cwd."""
+    import claude_code_sdk
+
+    captured = {}
+
+    class _Capture:
+        def __init__(self, options=None):
+            captured["options"] = options
+
+    monkeypatch.setattr(claude_code_sdk, "ClaudeSDKClient", _Capture)
+    monkeypatch.delenv("AGENTBRIDGE_CLAUDE_SETTING_SOURCES", raising=False)
+    ClaudeCodeAdapter.client_factory = None
+
+    adapter = ClaudeCodeAdapter(Path("/tmp/some-workspace"))
+    adapter._make_client()
+
+    opts = captured["options"]
+    assert str(opts.cwd) == "/tmp/some-workspace"
+    assert opts.extra_args.get("setting-sources") == "user,project,local"
+
+
+def test_make_client_omits_flag_when_sources_empty(monkeypatch):
+    import claude_code_sdk
+
+    captured = {}
+
+    class _Capture:
+        def __init__(self, options=None):
+            captured["options"] = options
+
+    monkeypatch.setattr(claude_code_sdk, "ClaudeSDKClient", _Capture)
+    monkeypatch.setenv("AGENTBRIDGE_CLAUDE_SETTING_SOURCES", "")
+    ClaudeCodeAdapter.client_factory = None
+
+    adapter = ClaudeCodeAdapter(Path("."))
+    adapter._make_client()
+
+    assert "setting-sources" not in captured["options"].extra_args

@@ -23,12 +23,27 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import os
 import re
 import uuid
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable
 
 from .base import AgentAdapter, AgentEvent, Capabilities, SessionContext
+
+# Which settings the Claude Code CLI should load from disk. In ``--print`` (SDK) mode the CLI
+# does NOT read project/local filesystem settings unless told to, so we opt in explicitly:
+# this is what makes the workspace's .claude/settings.json, .claude/settings.local.json,
+# .mcp.json, hooks, agents, and CLAUDE.md take effect (plus the developer's own user
+# settings). Override with AGENTBRIDGE_CLAUDE_SETTING_SOURCES (comma-separated subset of
+# user,project,local) or set it empty to fall back to the CLI default.
+_DEFAULT_SETTING_SOURCES = "user,project,local"
+
+
+def _setting_sources() -> str | None:
+    raw = os.environ.get("AGENTBRIDGE_CLAUDE_SETTING_SOURCES", _DEFAULT_SETTING_SOURCES)
+    raw = raw.strip()
+    return raw or None
 
 # Tools that should ask the user before running. Read-only tools are auto-approved by the
 # SDK and never reach our callback; these are the ones worth a confirmation.
@@ -147,11 +162,19 @@ class ClaudeCodeAdapter(AgentAdapter):
 
         from claude_code_sdk import ClaudeCodeOptions, ClaudeSDKClient  # type: ignore
 
+        # Opt in to loading the workspace's Claude Code settings (see _setting_sources).
+        # Passed as a raw CLI flag because this SDK version has no setting_sources field.
+        extra_args: dict[str, str | None] = {}
+        sources = _setting_sources()
+        if sources:
+            extra_args["setting-sources"] = sources
+
         options = ClaudeCodeOptions(
             cwd=str(self.workspace),
             permission_mode="default",  # 'default' => edits/bash route through can_use_tool
             can_use_tool=self._can_use_tool,
             resume=self._resume,  # continue a prior conversation when reopening a chat
+            extra_args=extra_args,
         )
         return ClaudeSDKClient(options=options)
 
