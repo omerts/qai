@@ -24,9 +24,11 @@
   var ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
   // Crosshair "select element" icon (devtools-style inspector).
   var INSPECT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="4"/></svg>';
+  var SHIELD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>';
 
   var LS_AGENT = "agentbridge:agent";
   var LS_CHAT = "agentbridge:activeChat";
+  var LS_AUTO = "agentbridge:autoApprove";
 
   function lsGet(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } }
   function lsSet(k, v) { try { window.localStorage.setItem(k, v); } catch (e) {} }
@@ -64,6 +66,7 @@
     this._reconnectTimer = null;
     this.pendingElement = null;  // element picked via the inspector, attached to next msg
     this._inspecting = false;
+    this.autoApprove = lsGet(LS_AUTO) !== "0";  // default ON; "0" = user turned it off
     this._autoOpened = false;
     this._init();
   }
@@ -127,10 +130,14 @@
     this.inspectBtn = h("button", { class: "ab-iconbtn ab-inspect", title: "Select an element on the page to attach as context" });
     this.inspectBtn.innerHTML = INSPECT_ICON;
     this.inspectBtn.addEventListener("click", function () { self._toggleInspect(); });
+    this.autoBtn = h("button", { class: "ab-iconbtn ab-autoapprove" });
+    this.autoBtn.innerHTML = SHIELD_ICON;
+    this.autoBtn.addEventListener("click", function () { self._toggleAutoApprove(); });
     this.branchLabel = h("span", { class: "ab-branch-label" });
     var controls = h("div", { class: "ab-controls" }, [
-      this.agentSelect, this.branchBtn, this.prBtn, this.inspectBtn, this.branchLabel,
+      this.agentSelect, this.branchBtn, this.prBtn, this.inspectBtn, this.autoBtn, this.branchLabel,
     ]);
+    this._refreshAutoApproveBtn();
 
     // Messages
     this.messages = h("div", { class: "ab-messages" });
@@ -454,8 +461,25 @@
     this.currentAgentMsg = null;
     var context = { page: this._collectPageContext() };
     if (this.pendingElement) context.element = this.pendingElement;
-    this._send({ type: "user_message", chat_id: this.activeChatId, text: text, context: context });
+    this._send({
+      type: "user_message", chat_id: this.activeChatId, text: text,
+      context: context, auto_approve: this.autoApprove,
+    });
     this._clearPendingElement();
+  };
+
+  AgentBridgeWidget.prototype._toggleAutoApprove = function () {
+    this.autoApprove = !this.autoApprove;
+    lsSet(LS_AUTO, this.autoApprove ? "1" : "0");
+    this._refreshAutoApproveBtn();
+  };
+
+  AgentBridgeWidget.prototype._refreshAutoApproveBtn = function () {
+    if (!this.autoBtn) return;
+    this.autoBtn.classList.toggle("active", this.autoApprove);
+    this.autoBtn.title = this.autoApprove
+      ? "Auto-approve is ON — edits and safe commands run without asking (risky commands still prompt). Click to require approval."
+      : "Auto-approve is OFF — you confirm each file edit and command. Click to let the agent run them automatically.";
   };
 
   AgentBridgeWidget.prototype._newChatHint = function () {

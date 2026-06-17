@@ -124,6 +124,9 @@
 .ab-iconbtn.ab-inspect { display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; padding: 4px; }
 .ab-iconbtn.ab-inspect svg { width: 16px; height: 16px; }
 .ab-iconbtn.ab-inspect.active { color: var(--ab-accent-fg); background: var(--ab-accent); }
+.ab-iconbtn.ab-autoapprove { display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; padding: 4px; }
+.ab-iconbtn.ab-autoapprove svg { width: 16px; height: 16px; }
+.ab-iconbtn.ab-autoapprove.active { color: #fff; background: #16a34a; }
 
 /* Pending attached-element chip */
 .ab-context-bar { display: none; padding: 6px 12px 0; }

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import re
 import uuid
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable
@@ -33,6 +34,33 @@ from .base import AgentAdapter, AgentEvent, Capabilities, SessionContext
 # SDK and never reach our callback; these are the ones worth a confirmation.
 _CONFIRM_TOOLS = {"edit", "write", "multiedit", "str_replace", "notebookedit", "bash"}
 _ALLOW_ANSWERS = {"allow", "yes", "y", "approve", "ok", ""}
+
+# When auto-approval is on we still pause for confirmation on shell commands that look
+# destructive or hard to undo. Matched case-insensitively against the whole command line.
+_RISKY_BASH_PATTERNS = [
+    r"\brm\s+(?:-\w*\s+)*-?\w*r",        # rm -r / rm -rf / rm -fr (recursive delete)
+    r"\bsudo\b",                          # privilege escalation
+    r"\bmkfs(?:\.\w+)?\b",                # format a filesystem
+    r"\bdd\b.*\bof=",                     # raw disk write
+    r"\bof=/dev/",                        # writing to a device
+    r">\s*/dev/(?:sd|nvme|disk|hd)",      # redirect into a block device
+    r":\s*\(\s*\)\s*\{",                  # fork bomb :(){ :|:& };:
+    r"\bchmod\s+(?:-\w*\s+)*-?\w*[rR]",   # recursive chmod
+    r"\bchown\s+(?:-\w*\s+)*-?\w*[rR]",   # recursive chown
+    r"(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:ba)?sh",  # curl … | sh (remote code exec)
+    r"\bgit\s+push\b[^\n]*(?:--force\b|--force-with-lease\b|\s-f\b)",  # force push
+    r"\bgit\s+reset\s+--hard\b",          # discard local work
+    r"\bgit\s+clean\s+-\w*[fd]",          # delete untracked files
+    r"\b(?:shutdown|reboot|halt|poweroff)\b",
+    r"\bkillall\b|\bkill\s+-9\b",
+    r">\s*/(?:etc|usr|bin|boot|sys|var)\b",  # clobbering a system path
+]
+_RISKY_BASH_RE = re.compile("|".join(_RISKY_BASH_PATTERNS), re.IGNORECASE)
+
+
+def _is_risky_bash(command: str) -> bool:
+    """True if a shell command looks destructive enough to confirm even under auto-approve."""
+    return bool(command) and _RISKY_BASH_RE.search(command) is not None
 
 
 def _sdk_installed() -> bool:
@@ -91,6 +119,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         self._queue: asyncio.Queue[AgentEvent] | None = None
         self._resume: str | None = None   # session id to resume from (set at start)
         self._session_id: str | None = None  # latest session id seen (for persistence)
+        self._auto_approve: bool = False   # when True, skip prompts for routine edits/commands
 
     @classmethod
     def is_available(cls) -> bool:
@@ -129,6 +158,9 @@ class ClaudeCodeAdapter(AgentAdapter):
     def resume_handle(self) -> str | None:
         return self._session_id
 
+    def set_auto_approve(self, enabled: bool) -> None:
+        self._auto_approve = bool(enabled)
+
     # ------------------------------------------------------------------ #
     # Interactive permission callback
     # ------------------------------------------------------------------ #
@@ -136,10 +168,20 @@ class ClaudeCodeAdapter(AgentAdapter):
     async def _can_use_tool(self, tool_name: str, tool_input: dict, context: Any):
         from claude_code_sdk import PermissionResultAllow, PermissionResultDeny  # type: ignore
 
+        name = tool_name.lower()
+
         # Auto-approve anything not in the confirm set (the SDK rarely calls us for these,
         # but be defensive).
-        if tool_name.lower() not in _CONFIRM_TOOLS:
+        if name not in _CONFIRM_TOOLS:
             return PermissionResultAllow(updated_input=tool_input)
+
+        # Auto-approve mode: edits run silently; shell commands run unless they look risky.
+        if self._auto_approve:
+            if name != "bash":
+                return PermissionResultAllow(updated_input=tool_input)
+            if not _is_risky_bash(str(tool_input.get("command", ""))):
+                return PermissionResultAllow(updated_input=tool_input)
+            # Risky command — fall through to ask the user anyway.
 
         answer = await self._ask(self._describe_tool(tool_name, tool_input), options=["Allow", "Deny"])
         if answer.strip().lower() in _ALLOW_ANSWERS:

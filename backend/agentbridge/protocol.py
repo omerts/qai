@@ -84,6 +84,9 @@ class UserMessage(BaseModel):
     # Optional browser context the widget collects (route, framework, components, a picked
     # element). Free-form; the server formats it into a preamble for the agent.
     context: dict | None = None
+    # When True, the agent auto-approves routine file edits and shell commands for this turn
+    # (risky shell commands still prompt). Reflects the widget's auto-approve toggle.
+    auto_approve: bool = False
 
 
 class AgentResponse(BaseModel):

@@ -138,6 +138,9 @@ class Session:
             await self.send(P.ErrorMessage(message=f"Could not start agent: {exc}", chat_id=self.chat_id))
             return
 
+        # Honor the widget's auto-approve toggle for this turn (no-op for headless adapters).
+        self.adapter.set_auto_approve(msg.auto_approve)  # type: ignore[union-attr]
+
         text = msg.text
         preamble = self._format_context(msg.context)
         if preamble:

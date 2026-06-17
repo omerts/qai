@@ -132,6 +132,13 @@ class AgentAdapter(ABC):
         """
         return None
 
+    def set_auto_approve(self, enabled: bool) -> None:
+        """Toggle auto-approval of tool actions (file edits / shell commands) for upcoming
+        turns. When enabled, an interactive adapter should skip the Allow/Deny prompt for
+        routine actions. Default is a no-op — headless adapters (e.g. Cursor) never prompt.
+        """
+        return None
+
 
 class AgentUnavailableError(RuntimeError):
     """Raised when an adapter is selected but its backing tool is not installed."""

@@ -63,7 +63,11 @@ carries a `chat_id`; the widget renders only messages for the chat currently on 
 2. Pick an agent + press **+** → starts a chat **on the current branch** (no branch is created).
 3. Chat → the agent's output streams in; changed files appear in the footer. If the agent
    needs approval (e.g. Claude Code wanting to edit a file), an **Allow / Deny** card appears
-   and the agent waits for your answer (`agent_prompt` → `agent_response`).
+   and the agent waits for your answer (`agent_prompt` → `agent_response`). The **shield
+   toggle** (default on) auto-approves routine edits and safe shell commands so the agent
+   runs uninterrupted; risky commands (`rm -rf`, `sudo`, `git push --force`, `curl … | sh`,
+   …) still prompt. The toggle is remembered in `localStorage` and sent as `auto_approve` on
+   each `user_message`.
 4. When the agent first edits a file on the base branch, the widget shows a **"Branch out?"**
    card — accepting it sends `create_branch`. You can also click **Branch** any time. Nothing
    branches automatically. This only *chooses* the branch name: the agent keeps editing in

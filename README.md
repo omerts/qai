@@ -100,6 +100,15 @@ headless (`--print --force --trust`) so it doesn't block on approval prompts; it
 incremental output via `stream-json --stream-partial-output` and keeps multi-turn context
 through a `create-chat` id passed to `--resume`.
 
+**Auto-approve (default on).** The widget has a shield toggle (next to the inspect button)
+that auto-approves the agent's routine actions so it can work without stopping for every
+edit. When on, file edits and ordinary shell commands run without a prompt — but commands
+that look destructive or hard to undo (`rm -rf`, `sudo`, `git push --force`,
+`git reset --hard`, `curl … | sh`, recursive `chmod`/`chown`, disk writes, `shutdown`, …)
+still surface an **Allow / Deny** card. Turn the toggle off to confirm every action. The
+preference is per-browser (`localStorage`) and sent with each message (`auto_approve`); it
+only affects Claude Code (Cursor is already headless).
+
 Each agent implements the `AgentAdapter` contract in
 [`backend/agentbridge/agents/base.py`](backend/agentbridge/agents/base.py). Add a new agent
 by writing one adapter and registering it in `agents/registry.py`.
