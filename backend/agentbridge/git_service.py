@@ -8,6 +8,7 @@ GitLab/Bitbucket later is a localized change.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -86,6 +87,80 @@ class GitService:
         except GitCommandError as exc:
             raise GitError(f"Could not create branch '{final}': {exc}") from exc
         return final
+
+    # --------------------------------------------------------------------- #
+    # Worktrees
+    # --------------------------------------------------------------------- #
+
+    def worktree_base_dir(self) -> Path:
+        """Where agent worktrees live. Outside the workspace by default so the user's dev
+        server (watching the workspace) never sees them, and out of ``.git``.
+
+        Override with ``AGENTBRIDGE_WORKTREE_DIR``.
+        """
+        env = os.environ.get("AGENTBRIDGE_WORKTREE_DIR")
+        if env:
+            return Path(env).expanduser()
+        root = Path(self.repo.working_dir)
+        return root.parent / ".agentbridge-worktrees"
+
+    def _stash_count(self) -> int:
+        return len([ln for ln in self.repo.git.stash("list").splitlines() if ln.strip()])
+
+    def worktree_dir_for(self, branch: str) -> Path:
+        slug = branch.replace("/", "__")
+        return self.worktree_base_dir() / f"{Path(self.repo.working_dir).name}__{slug}"
+
+    def _registered_worktrees(self) -> set[str]:
+        out = self.repo.git.worktree("list", "--porcelain")
+        paths: set[str] = set()
+        for line in out.splitlines():
+            if line.startswith("worktree "):
+                paths.add(str(Path(line[len("worktree "):].strip())))
+        return paths
+
+    def ensure_worktree(self, branch: str, base: str | None = None) -> Path:
+        """Return a worktree dir checked out to ``branch``, creating it if needed.
+
+        The workspace's own HEAD is never switched — the branch is only ever checked out in
+        this dedicated worktree, so the workspace (and the dev server running against it)
+        keeps its current branch. Reuses an existing worktree for the branch if present.
+        """
+        path = self.worktree_dir_for(branch)
+        if path.exists() and str(path) in self._registered_worktrees():
+            return path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        heads = {h.name for h in self.repo.heads}
+        base_ref = base or self.current_branch()
+        try:
+            if branch in heads:
+                self.repo.git.worktree("add", str(path), branch)
+            else:
+                self.repo.git.worktree("add", "-b", branch, str(path), base_ref)
+        except GitCommandError as exc:
+            raise GitError(f"Could not create worktree for '{branch}': {exc}") from exc
+        return path
+
+    def migrate_uncommitted_to(self, worktree_path: Path) -> bool:
+        """Move the workspace's uncommitted changes into ``worktree_path``.
+
+        Used at commit/PR time: the agent edits in place (so hot reload shows changes), and
+        only when the user opens a PR are those edits relocated onto the branch worktree —
+        leaving the workspace clean and its branch untouched. Returns True if anything moved.
+        """
+        if not self.has_uncommitted_changes():
+            return False
+        before = self._stash_count()
+        self.repo.git.stash("push", "--include-untracked", "-m", "agentbridge:stage")
+        if self._stash_count() <= before:
+            return False
+        wt = Repo(worktree_path)
+        try:
+            wt.git.stash("apply", "stash@{0}")
+            self.repo.git.stash("drop", "stash@{0}")
+        except GitCommandError as exc:
+            raise GitError(f"Staging changes into the worktree failed: {exc}") from exc
+        return True
 
     def status(self) -> list[FileChange]:
         """Working-tree changes as porcelain entries (staged + unstaged + untracked)."""

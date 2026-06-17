@@ -77,7 +77,8 @@ async def test_session_suggests_branch_on_first_edit(tmp_path: Path):
     assert "branch_created" not in types
 
 
-async def test_session_create_branch_is_user_triggered(tmp_path: Path):
+async def test_session_create_branch_is_user_triggered(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("AGENTBRIDGE_WORKTREE_DIR", str(tmp_path.parent / "wt"))
     _init_repo(tmp_path)
     sent: list[P.ServerMessage] = []
 
@@ -87,5 +88,10 @@ async def test_session_create_branch_is_user_triggered(tmp_path: Path):
     session = Session(tmp_path, send, github_token=None)
     await session.handle(P.CreateBranch(type="create_branch", name="agentbridge/manual"))
 
-    assert session.git.current_branch() == "agentbridge/manual"
-    assert any(m.type == "branch_created" for m in sent)
+    # Choosing a branch does NOT switch the workspace branch or create anything yet — the
+    # branch is recorded and materialized as a worktree only at PR time.
+    assert session.git.current_branch() == "main"
+    assert session.target_branch == "agentbridge/manual"
+    created = [m for m in sent if m.type == "branch_created"]
+    assert created and created[0].branch == "agentbridge/manual"
+    assert created[0].worktree_path is None

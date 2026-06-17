@@ -47,6 +47,7 @@ Configuration (all optional, via env vars):
 | `AGENTBRIDGE_WORKSPACE`  | cwd           | Repo the agent operates on               |
 | `AGENTBRIDGE_HOST`       | `127.0.0.1`   | Bind host                                |
 | `AGENTBRIDGE_PORT`       | `8000`        | Bind port                                |
+| `AGENTBRIDGE_WORKTREE_DIR`| `<repo>/../.agentbridge-worktrees` | Where branch worktrees are created |
 | `GITHUB_TOKEN`/`GH_TOKEN`| —             | PR creation (falls back to `gh auth token`) |
 
 ### Run with Docker (alternative to step 1)
@@ -106,10 +107,34 @@ by writing one adapter and registering it in `agents/registry.py`.
 
 1. Open the bubble → pick an agent → a session starts **on your current branch**.
 2. Describe a change in chat → the agent streams its work; edited files show in the footer.
-3. The agent **offers** to branch when it starts editing on your base branch — you accept or
-   ignore it. You can also click **Branch** at any time. Branching is always your call.
-4. Click **Create PR** → AgentBridge commits, pushes, and opens a GitHub PR; the link
-   appears in chat.
+3. The agent **offers** to choose a branch when it starts editing on your base branch — you
+   accept or ignore it. You can also click **Branch** at any time. Branching is always your call.
+4. Click **Create PR** → AgentBridge commits the edits onto the branch, pushes, and opens a
+   GitHub PR; the link appears in chat.
+
+### Edit in place, branch at commit time (hot reload works)
+
+The agent edits files **directly in your workspace directory** the whole time it's working,
+so a dev server running there with hot reload shows its changes **live** — no extra setup.
+
+Your workspace's checked-out branch is never switched or committed to. Instead, clicking
+**Branch** just *chooses* the branch name for this work (nothing is created yet). When you
+**Create PR**, AgentBridge creates a [git worktree](https://git-scm.com/docs/git-worktree)
+for that branch, relocates your in-place edits onto it, and commits/pushes from there — then
+opens the PR. After that the workspace returns to a clean state on its original branch.
+
+> Worktrees are created lazily at PR time under `AGENTBRIDGE_WORKTREE_DIR` (default: a
+> `.agentbridge-worktrees` folder beside your repo; a persistent `/worktrees` volume in
+> Docker). Because the agent works in the workspace, its conversation is never reset.
+
+### What the agent sees (page context)
+
+With every message the widget attaches lightweight **browser context** to help the agent:
+the current route/URL, the detected framework + version (React / Vue / Angular), the page
+title, and a best-effort list of components on the page. Use the **crosshair button** to
+turn on *inspect mode*, then click any element on your app — its tag, CSS selector, text,
+and (where resolvable) the owning component name and source file are attached to your next
+message as context.
 
 ## Development
 

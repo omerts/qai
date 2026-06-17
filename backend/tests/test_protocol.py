@@ -17,6 +17,22 @@ def test_parse_create_branch_optional_fields():
     assert msg.name is None and msg.base_branch is None
 
 
+def test_parse_user_message_with_context():
+    msg = P.parse_client_message({
+        "type": "user_message",
+        "text": "fix this button",
+        "context": {"page": {"route": "/orders/42", "framework": {"name": "React"}},
+                    "element": {"label": "<button>", "component": "SaveButton"}},
+    })
+    assert isinstance(msg, P.UserMessage)
+    assert msg.context["element"]["component"] == "SaveButton"
+
+
+def test_user_message_context_optional():
+    msg = P.parse_client_message({"type": "user_message", "text": "hi"})
+    assert msg.context is None
+
+
 def test_parse_unknown_type_raises():
     with pytest.raises(ValidationError):
         P.parse_client_message({"type": "nope"})

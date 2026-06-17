@@ -94,6 +94,8 @@ def client(tmp_path: Path, monkeypatch):
     _init_repo(tmp_path)
     # Point the server at the temp repo and give it a token.
     monkeypatch.setenv("AGENTBRIDGE_WORKSPACE", str(tmp_path))
+    # Keep agent worktrees out of the repo (and out of other tests' way).
+    monkeypatch.setenv("AGENTBRIDGE_WORKTREE_DIR", str(tmp_path.parent / "agentbridge-wt"))
     config.get_settings.cache_clear()
     config.github_token.cache_clear()
     monkeypatch.setattr(config.Settings, "github_token", property(lambda self: "fake-token"))
@@ -141,16 +143,21 @@ def test_full_session_flow(client):
         # File the agent created is really on disk.
         assert (repo / "feature.txt").exists()
 
-        # User accepts the branch suggestion.
+        # User chooses a branch. Nothing is checked out yet — the agent's edits stay live
+        # in the workspace (so the dev server's hot reload keeps showing them).
         ws.send_json({"type": "create_branch", "name": suggested["suggested_name"]})
         created = _recv_until(ws, "branch_created")
         assert created["branch"].startswith("agentbridge/")
+        assert created["worktree_path"] is None
+        assert (repo / "feature.txt").exists()        # still live in the workspace
 
-        # Open a PR.
+        # Open a PR: now the branch worktree is created and the edits are committed onto it,
+        # leaving the workspace branch untouched and its tree clean.
         ws.send_json({"type": "create_pr", "title": "Add feature"})
         pr = _recv_until(ws, "pr_created")
         assert pr["url"].endswith("/pull/7")
         assert pr["number"] == 7
+        assert not (repo / "feature.txt").exists()    # relocated onto the branch worktree
 
 
 def test_interactive_prompt_round_trip(client):

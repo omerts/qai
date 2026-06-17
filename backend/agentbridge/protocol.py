@@ -48,6 +48,11 @@ class StartSession(BaseModel):
 class UserMessage(BaseModel):
     type: Literal["user_message"]
     text: str
+    # Optional browser context the widget collects to help the agent: current route,
+    # framework + version, components on the page, and a user-selected element. Free-form
+    # so the widget can enrich it without a protocol bump; the server formats it into a
+    # readable preamble prepended to the agent prompt.
+    context: dict | None = None
 
 
 class AgentResponse(BaseModel):
@@ -138,6 +143,9 @@ class BranchSuggested(ServerMessage):
 class BranchCreated(ServerMessage):
     type: Literal["branch_created"] = "branch_created"
     branch: str
+    # Absolute path of the isolated git worktree the agent now operates in. The user's
+    # workspace path (where their dev server runs) keeps its original branch untouched.
+    worktree_path: str | None = None
 
 
 class FileChanges(ServerMessage):

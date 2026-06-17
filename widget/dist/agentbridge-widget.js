@@ -15,9 +15,11 @@
 
   // The build step replaces this placeholder with the contents of agentbridge-widget.css.
   // When running un-built from /widget-src, we fall back to fetching the sibling .css.
-  var STYLES = "/* Styles for the AgentBridge widget. Injected into the widget's Shadow DOM, so these\n   selectors never leak into \u2014 or inherit from \u2014 the host application. */\n\n:host {\n  --ab-accent: #4f46e5;\n  --ab-accent-fg: #ffffff;\n  --ab-bg: #ffffff;\n  --ab-fg: #1f2329;\n  --ab-muted: #6b7280;\n  --ab-border: #e5e7eb;\n  --ab-surface: #f7f7f9;\n  --ab-radius: 14px;\n  --ab-font: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif;\n  --ab-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;\n}\n\n* { box-sizing: border-box; }\n\n.ab-root {\n  position: fixed;\n  z-index: 2147483000;\n  font-family: var(--ab-font);\n  color: var(--ab-fg);\n}\n.ab-root.bottom-right { right: 20px; bottom: 20px; }\n.ab-root.bottom-left { left: 20px; bottom: 20px; }\n\n/* Launcher bubble */\n.ab-bubble {\n  width: 56px; height: 56px;\n  border-radius: 50%;\n  background: var(--ab-accent);\n  color: var(--ab-accent-fg);\n  border: none;\n  cursor: pointer;\n  box-shadow: 0 6px 24px rgba(0,0,0,.22);\n  display: flex; align-items: center; justify-content: center;\n  transition: transform .15s ease;\n}\n.ab-bubble:hover { transform: scale(1.06); }\n.ab-bubble svg { width: 26px; height: 26px; }\n\n/* Chat panel */\n.ab-panel {\n  display: none;\n  flex-direction: column;\n  width: 380px;\n  max-width: calc(100vw - 32px);\n  height: 560px;\n  max-height: calc(100vh - 40px);\n  background: var(--ab-bg);\n  border: 1px solid var(--ab-border);\n  border-radius: var(--ab-radius);\n  box-shadow: 0 12px 48px rgba(0,0,0,.24);\n  overflow: hidden;\n}\n.ab-root.open .ab-panel { display: flex; }\n.ab-root.open .ab-bubble { display: none; }\n\n.ab-header {\n  display: flex; align-items: center; gap: 8px;\n  padding: 10px 12px;\n  background: var(--ab-surface);\n  border-bottom: 1px solid var(--ab-border);\n}\n.ab-header .ab-title { font-weight: 600; font-size: 14px; flex: 1; }\n.ab-status-dot { width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; }\n.ab-status-dot.connected { background: #22c55e; }\n.ab-status-dot.working { background: #f59e0b; animation: ab-pulse 1s infinite; }\n@keyframes ab-pulse { 50% { opacity: .35; } }\n.ab-iconbtn {\n  background: none; border: none; cursor: pointer; color: var(--ab-muted);\n  font-size: 18px; line-height: 1; padding: 4px;\n}\n\n/* Controls row (agent picker + branch) */\n.ab-controls {\n  display: flex; gap: 8px; align-items: center;\n  padding: 8px 12px;\n  border-bottom: 1px solid var(--ab-border);\n  flex-wrap: wrap;\n}\n.ab-select, .ab-btn {\n  font: inherit; font-size: 12px;\n  border: 1px solid var(--ab-border);\n  border-radius: 8px;\n  padding: 5px 8px;\n  background: var(--ab-bg);\n  color: var(--ab-fg);\n  cursor: pointer;\n}\n.ab-btn.primary { background: var(--ab-accent); color: var(--ab-accent-fg); border-color: var(--ab-accent); }\n.ab-btn:disabled { opacity: .5; cursor: not-allowed; }\n.ab-branch-label { font-size: 11px; color: var(--ab-muted); margin-left: auto; font-family: var(--ab-mono); }\n\n/* Messages */\n.ab-messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }\n.ab-msg { max-width: 88%; padding: 8px 11px; border-radius: 12px; font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }\n.ab-msg.user { align-self: flex-end; background: var(--ab-accent); color: var(--ab-accent-fg); border-bottom-right-radius: 4px; }\n.ab-msg.agent { align-self: flex-start; background: var(--ab-surface); border-bottom-left-radius: 4px; }\n.ab-msg.agent.thinking { font-style: italic; color: var(--ab-muted); }\n.ab-msg.error { align-self: stretch; background: #fee2e2; color: #991b1b; }\n.ab-msg.system { align-self: center; background: transparent; color: var(--ab-muted); font-size: 12px; }\n\n/* Branch suggestion / interactive prompt cards */\n.ab-card {\n  align-self: stretch;\n  border: 1px solid var(--ab-border);\n  border-left: 3px solid var(--ab-accent);\n  border-radius: 10px;\n  padding: 10px 12px;\n  background: var(--ab-surface);\n  font-size: 12px;\n}\n.ab-card .ab-card-title { font-weight: 600; margin-bottom: 4px; }\n.ab-card code { font-family: var(--ab-mono); background: rgba(0,0,0,.06); padding: 1px 5px; border-radius: 4px; }\n.ab-card .ab-card-actions { display: flex; gap: 8px; margin-top: 8px; }\n.ab-prompt-input { width: 100%; margin-top: 8px; }\n\n/* Changed files */\n.ab-files {\n  border-top: 1px solid var(--ab-border);\n  padding: 6px 12px; max-height: 110px; overflow-y: auto;\n  font-size: 12px; display: none;\n}\n.ab-files.show { display: block; }\n.ab-files .ab-files-head { color: var(--ab-muted); margin-bottom: 4px; }\n.ab-file { font-family: var(--ab-mono); font-size: 11px; display: flex; gap: 6px; }\n.ab-file .code { color: var(--ab-accent); width: 18px; }\n\n/* Composer */\n.ab-composer { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--ab-border); }\n.ab-input {\n  flex: 1; resize: none; font: inherit; font-size: 13px;\n  border: 1px solid var(--ab-border); border-radius: 10px; padding: 8px 10px;\n  max-height: 120px; color: var(--ab-fg); background: var(--ab-bg);\n}\n.ab-send {\n  border: none; background: var(--ab-accent); color: var(--ab-accent-fg);\n  border-radius: 10px; width: 40px; cursor: pointer; font-size: 16px;\n}\n.ab-send:disabled { opacity: .5; cursor: not-allowed; }\n";
+  var STYLES = "/* Styles for the AgentBridge widget. Injected into the widget's Shadow DOM, so these\n   selectors never leak into \u2014 or inherit from \u2014 the host application. */\n\n:host {\n  --ab-accent: #4f46e5;\n  --ab-accent-fg: #ffffff;\n  --ab-bg: #ffffff;\n  --ab-fg: #1f2329;\n  --ab-muted: #6b7280;\n  --ab-border: #e5e7eb;\n  --ab-surface: #f7f7f9;\n  --ab-radius: 14px;\n  --ab-font: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif;\n  --ab-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;\n}\n\n* { box-sizing: border-box; }\n\n.ab-root {\n  position: fixed;\n  z-index: 2147483000;\n  font-family: var(--ab-font);\n  color: var(--ab-fg);\n}\n.ab-root.bottom-right { right: 20px; bottom: 20px; }\n.ab-root.bottom-left { left: 20px; bottom: 20px; }\n\n/* Launcher bubble */\n.ab-bubble {\n  width: 56px; height: 56px;\n  border-radius: 50%;\n  background: var(--ab-accent);\n  color: var(--ab-accent-fg);\n  border: none;\n  cursor: pointer;\n  box-shadow: 0 6px 24px rgba(0,0,0,.22);\n  display: flex; align-items: center; justify-content: center;\n  transition: transform .15s ease;\n}\n.ab-bubble:hover { transform: scale(1.06); }\n.ab-bubble svg { width: 26px; height: 26px; }\n\n/* Chat panel */\n.ab-panel {\n  display: none;\n  flex-direction: column;\n  width: 380px;\n  max-width: calc(100vw - 32px);\n  height: 560px;\n  max-height: calc(100vh - 40px);\n  background: var(--ab-bg);\n  border: 1px solid var(--ab-border);\n  border-radius: var(--ab-radius);\n  box-shadow: 0 12px 48px rgba(0,0,0,.24);\n  overflow: hidden;\n}\n.ab-root.open .ab-panel { display: flex; }\n.ab-root.open .ab-bubble { display: none; }\n\n.ab-header {\n  display: flex; align-items: center; gap: 8px;\n  padding: 10px 12px;\n  background: var(--ab-surface);\n  border-bottom: 1px solid var(--ab-border);\n}\n.ab-header .ab-title { font-weight: 600; font-size: 14px; flex: 1; }\n.ab-status-dot { width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; }\n.ab-status-dot.connected { background: #22c55e; }\n.ab-status-dot.working { background: #f59e0b; animation: ab-pulse 1s infinite; }\n@keyframes ab-pulse { 50% { opacity: .35; } }\n.ab-iconbtn {\n  background: none; border: none; cursor: pointer; color: var(--ab-muted);\n  font-size: 18px; line-height: 1; padding: 4px;\n}\n\n/* Controls row (agent picker + branch) */\n.ab-controls {\n  display: flex; gap: 8px; align-items: center;\n  padding: 8px 12px;\n  border-bottom: 1px solid var(--ab-border);\n  flex-wrap: wrap;\n}\n.ab-select, .ab-btn {\n  font: inherit; font-size: 12px;\n  border: 1px solid var(--ab-border);\n  border-radius: 8px;\n  padding: 5px 8px;\n  background: var(--ab-bg);\n  color: var(--ab-fg);\n  cursor: pointer;\n}\n.ab-btn.primary { background: var(--ab-accent); color: var(--ab-accent-fg); border-color: var(--ab-accent); }\n.ab-btn:disabled { opacity: .5; cursor: not-allowed; }\n.ab-branch-label { font-size: 11px; color: var(--ab-muted); margin-left: auto; font-family: var(--ab-mono); }\n.ab-iconbtn.ab-inspect { display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; padding: 4px; }\n.ab-iconbtn.ab-inspect svg { width: 16px; height: 16px; }\n.ab-iconbtn.ab-inspect.active { color: var(--ab-accent-fg); background: var(--ab-accent); }\n\n/* Pending attached-element chip */\n.ab-context-bar { display: none; padding: 6px 12px 0; }\n.ab-context-bar.show { display: block; }\n.ab-chip {\n  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;\n  background: var(--ab-surface); border: 1px solid var(--ab-border);\n  border-radius: 999px; padding: 3px 6px 3px 10px; font-size: 12px;\n}\n.ab-chip-text {\n  font-family: var(--ab-mono); white-space: nowrap; overflow: hidden;\n  text-overflow: ellipsis; max-width: 260px;\n}\n.ab-chip-x {\n  border: none; background: rgba(0,0,0,.06); color: var(--ab-muted);\n  border-radius: 50%; width: 18px; height: 18px; cursor: pointer; line-height: 1; font-size: 11px;\n}\n\n/* Messages */\n.ab-messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }\n.ab-msg { max-width: 88%; padding: 8px 11px; border-radius: 12px; font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }\n.ab-msg.user { align-self: flex-end; background: var(--ab-accent); color: var(--ab-accent-fg); border-bottom-right-radius: 4px; }\n.ab-msg.agent { align-self: flex-start; background: var(--ab-surface); border-bottom-left-radius: 4px; }\n.ab-msg.agent.thinking { font-style: italic; color: var(--ab-muted); }\n.ab-msg.error { align-self: stretch; background: #fee2e2; color: #991b1b; }\n.ab-msg.system { align-self: center; background: transparent; color: var(--ab-muted); font-size: 12px; }\n\n/* Branch suggestion / interactive prompt cards */\n.ab-card {\n  align-self: stretch;\n  border: 1px solid var(--ab-border);\n  border-left: 3px solid var(--ab-accent);\n  border-radius: 10px;\n  padding: 10px 12px;\n  background: var(--ab-surface);\n  font-size: 12px;\n}\n.ab-card .ab-card-title { font-weight: 600; margin-bottom: 4px; }\n.ab-card code { font-family: var(--ab-mono); background: rgba(0,0,0,.06); padding: 1px 5px; border-radius: 4px; }\n.ab-card .ab-card-actions { display: flex; gap: 8px; margin-top: 8px; }\n.ab-prompt-input { width: 100%; margin-top: 8px; }\n\n/* Changed files */\n.ab-files {\n  border-top: 1px solid var(--ab-border);\n  padding: 6px 12px; max-height: 110px; overflow-y: auto;\n  font-size: 12px; display: none;\n}\n.ab-files.show { display: block; }\n.ab-files .ab-files-head { color: var(--ab-muted); margin-bottom: 4px; }\n.ab-file { font-family: var(--ab-mono); font-size: 11px; display: flex; gap: 6px; }\n.ab-file .code { color: var(--ab-accent); width: 18px; }\n\n/* Composer */\n.ab-composer { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--ab-border); }\n.ab-input {\n  flex: 1; resize: none; font: inherit; font-size: 13px;\n  border: 1px solid var(--ab-border); border-radius: 10px; padding: 8px 10px;\n  max-height: 120px; color: var(--ab-fg); background: var(--ab-bg);\n}\n.ab-send {\n  border: none; background: var(--ab-accent); color: var(--ab-accent-fg);\n  border-radius: 10px; width: 40px; cursor: pointer; font-size: 16px;\n}\n.ab-send:disabled { opacity: .5; cursor: not-allowed; }\n";
 
   var ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+  // Crosshair "select element" icon (devtools-style inspector).
+  var INSPECT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="4"/></svg>';
 
   function h(tag, attrs, children) {
     var el = document.createElement(tag);
@@ -42,6 +44,8 @@
     this.branch = null;
     this.currentAgentMsg = null; // accumulating agent bubble for the active turn
     this.reconnectDelay = 1000;
+    this.pendingElement = null;  // element picked via the inspector, attached to next msg
+    this._inspecting = false;
     this._init();
   }
 
@@ -49,6 +53,7 @@
     var host = h("div");
     host.style.all = "initial";
     document.body.appendChild(host);
+    this.hostEl = host;          // used to exclude our own UI while inspecting
     this.shadow = host.attachShadow({ mode: "open" });
 
     var style = document.createElement("style");
@@ -88,13 +93,16 @@
     // Controls: agent picker + branch button
     this.agentSelect = h("select", { class: "ab-select", title: "Choose an agent" });
     this.agentSelect.addEventListener("change", function () { self._startSession(); });
-    this.branchBtn = h("button", { class: "ab-btn", text: "Branch" , title: "Create a git branch for this session"});
+    this.branchBtn = h("button", { class: "ab-btn", text: "Branch" , title: "Choose the branch this work commits to (created at PR time; your workspace branch is untouched)"});
     this.branchBtn.addEventListener("click", function () { self._requestBranch(); });
     this.prBtn = h("button", { class: "ab-btn", text: "Create PR", title: "Commit, push and open a pull request" });
     this.prBtn.addEventListener("click", function () { self._createPR(); });
+    this.inspectBtn = h("button", { class: "ab-iconbtn ab-inspect", title: "Select an element on the page to attach as context" });
+    this.inspectBtn.innerHTML = INSPECT_ICON;
+    this.inspectBtn.addEventListener("click", function () { self._toggleInspect(); });
     this.branchLabel = h("span", { class: "ab-branch-label" });
     var controls = h("div", { class: "ab-controls" }, [
-      this.agentSelect, this.branchBtn, this.prBtn, this.branchLabel,
+      this.agentSelect, this.branchBtn, this.prBtn, this.inspectBtn, this.branchLabel,
     ]);
 
     // Messages
@@ -114,7 +122,10 @@
     this.sendBtn.addEventListener("click", function () { self._sendMessage(); });
     var composer = h("div", { class: "ab-composer" }, [this.input, this.sendBtn]);
 
-    var panel = h("div", { class: "ab-panel" }, [header, controls, this.messages, this.files, composer]);
+    // Pending attached-element chip (populated by the inspector), sits above the composer.
+    this.contextBar = h("div", { class: "ab-context-bar" });
+
+    var panel = h("div", { class: "ab-panel" }, [header, controls, this.messages, this.files, this.contextBar, composer]);
     this.root.appendChild(this.bubble);
     this.root.appendChild(panel);
     this.shadow.appendChild(this.root);
@@ -125,6 +136,7 @@
   AgentBridgeWidget.prototype._toggle = function (open) {
     this.root.classList.toggle("open", open);
     if (open) this.input.focus();
+    else if (this._inspecting) this._stopInspect();
   };
 
   // ---- WebSocket -------------------------------------------------------- //
@@ -178,7 +190,15 @@
       case "branch_suggested": return this._onBranchSuggested(msg);
       case "branch_created":
         this.branch = msg.branch; this._updateBranchLabel();
-        this._system("Branch created: " + msg.branch);
+        if (msg.worktree_path) {
+          // PR time: the branch now exists on disk and the edits were committed to it.
+          this._system("Committed your changes to " + msg.branch
+            + "\nWorkspace branch untouched; worktree: " + msg.worktree_path);
+        } else {
+          // Branch chosen: nothing checked out yet — edits stay live in the workspace.
+          this._system("Target branch set: " + msg.branch
+            + "\nYour edits stay live in the app and commit here when you open a PR.");
+        }
         return;
       case "file_changes": return this._onFileChanges(msg.files);
       case "pr_created":
@@ -218,7 +238,12 @@
     this._addMsg("user", text);
     this.input.value = "";
     this.currentAgentMsg = null;
-    this._send({ type: "user_message", text: text });
+    // Attach browser context (route, framework, components) + any picked element so the
+    // agent understands what the user is looking at.
+    var context = { page: this._collectPageContext() };
+    if (this.pendingElement) context.element = this.pendingElement;
+    this._send({ type: "user_message", text: text, context: context });
+    this._clearPendingElement();
   };
 
   AgentBridgeWidget.prototype._requestBranch = function (suggestedName) {
@@ -230,6 +255,255 @@
     this.input.value = "";
     this._send({ type: "create_pr", title: title });
     this._system("Creating pull request…");
+  };
+
+  // ---- Page context collection ----------------------------------------- //
+
+  AgentBridgeWidget.prototype._collectPageContext = function () {
+    var ctx = { url: "", route: "", title: "" };
+    try {
+      ctx.url = location.href;
+      ctx.route = location.pathname + location.search + location.hash;
+      ctx.title = document.title;
+      ctx.framework = this._detectFramework();
+      ctx.components = this._collectComponents();
+    } catch (e) { /* best-effort */ }
+    return ctx;
+  };
+
+  AgentBridgeWidget.prototype._detectFramework = function () {
+    // Angular exposes a version attribute on its root element.
+    try {
+      var ng = document.querySelector("[ng-version]");
+      if (ng) return { name: "Angular", version: ng.getAttribute("ng-version") };
+    } catch (e) {}
+    // Vue: global, app marker, or an internal component handle on a node.
+    try {
+      if (window.Vue && window.Vue.version) return { name: "Vue", version: window.Vue.version };
+      if (document.querySelector("[data-v-app]") || window.__VUE__) return { name: "Vue", version: null };
+    } catch (e) {}
+    // React: global version, devtools hook, or a fiber/container key on a root node.
+    try {
+      if (window.React && window.React.version) return { name: "React", version: window.React.version };
+      if (this._reactRootPresent()) return { name: "React", version: null };
+    } catch (e) {}
+    return { name: null, version: null };
+  };
+
+  AgentBridgeWidget.prototype._reactRootPresent = function () {
+    var roots = document.querySelectorAll("#root, #app, body > div");
+    for (var i = 0; i < roots.length && i < 10; i++) {
+      var el = roots[i];
+      if (el._reactRootContainer) return true;
+      for (var k in el) {
+        if (k.indexOf("__reactContainer$") === 0 || k.indexOf("__reactFiber$") === 0) return true;
+      }
+    }
+    return false;
+  };
+
+  AgentBridgeWidget.prototype._collectComponents = function () {
+    var seen = {}, out = [];
+    function add(n) { if (n && !seen[n]) { seen[n] = 1; out.push(n); } }
+    // Custom-element tags (web components, Angular/Vue component selectors).
+    try {
+      var all = document.body ? document.body.getElementsByTagName("*") : [];
+      for (var i = 0; i < all.length && i < 4000 && out.length < 40; i++) {
+        var tag = all[i].tagName.toLowerCase();
+        if (tag.indexOf("-") !== -1) add(tag);
+      }
+    } catch (e) {}
+    // Angular component class names (sampled to stay cheap on large trees).
+    try {
+      if (window.ng && typeof window.ng.getComponent === "function") {
+        var ngEls = document.querySelectorAll("[ng-version] *");
+        for (var j = 0; j < ngEls.length && j < 500 && out.length < 40; j++) {
+          var c = window.ng.getComponent(ngEls[j]);
+          if (c && c.constructor) add(c.constructor.name);
+        }
+      }
+    } catch (e) {}
+    return out.slice(0, 40);
+  };
+
+  // ---- Element inspector (devtools-style "select element") ------------- //
+
+  AgentBridgeWidget.prototype._toggleInspect = function () {
+    if (this._inspecting) { this._stopInspect(); return; }
+    this._inspecting = true;
+    this.inspectBtn.classList.add("active");
+    var self = this;
+
+    var ov = document.createElement("div");
+    ov.style.cssText = "position:fixed;pointer-events:none;z-index:2147483646;display:none;"
+      + "background:rgba(79,70,229,.18);border:1px solid #4f46e5;border-radius:2px;";
+    document.body.appendChild(ov);
+    this._overlay = ov;
+
+    this._onMove = function (e) { self._inspectMove(e); };
+    this._onClick = function (e) { self._inspectClick(e); };
+    this._onKey = function (e) { if (e.key === "Escape") self._stopInspect(); };
+    document.addEventListener("mousemove", this._onMove, true);
+    document.addEventListener("click", this._onClick, true);
+    document.addEventListener("keydown", this._onKey, true);
+    this._system("Inspect mode on — click an element on the page to attach it (Esc to cancel).");
+  };
+
+  AgentBridgeWidget.prototype._stopInspect = function () {
+    this._inspecting = false;
+    if (this.inspectBtn) this.inspectBtn.classList.remove("active");
+    if (this._overlay) { this._overlay.remove(); this._overlay = null; }
+    document.removeEventListener("mousemove", this._onMove, true);
+    document.removeEventListener("click", this._onClick, true);
+    document.removeEventListener("keydown", this._onKey, true);
+  };
+
+  // The element under the pointer, or null if the pointer is over our own widget.
+  AgentBridgeWidget.prototype._inspectTarget = function (e) {
+    var path = e.composedPath ? e.composedPath() : [];
+    if (path.indexOf(this.hostEl) !== -1) return null;
+    return e.target && e.target.nodeType === 1 ? e.target : null;
+  };
+
+  AgentBridgeWidget.prototype._inspectMove = function (e) {
+    var el = this._inspectTarget(e);
+    if (!el) { this._overlay.style.display = "none"; return; }
+    var r = el.getBoundingClientRect();
+    var ov = this._overlay;
+    ov.style.display = "block";
+    ov.style.left = r.left + "px";
+    ov.style.top = r.top + "px";
+    ov.style.width = r.width + "px";
+    ov.style.height = r.height + "px";
+  };
+
+  AgentBridgeWidget.prototype._inspectClick = function (e) {
+    var el = this._inspectTarget(e);
+    if (!el) return; // click landed on our widget — let it behave normally
+    e.preventDefault();
+    e.stopPropagation();
+    this._setPendingElement(this._describeElement(el));
+    this._stopInspect();
+  };
+
+  AgentBridgeWidget.prototype._describeElement = function (el) {
+    var tag = el.tagName.toLowerCase();
+    var idPart = el.id ? "#" + el.id : "";
+    var clsPart = "";
+    if (typeof el.className === "string" && el.className.trim()) {
+      clsPart = "." + el.className.trim().split(/\s+/).slice(0, 3).join(".");
+    }
+    var attrs = {};
+    ["role", "aria-label", "name", "type", "href", "data-testid"].forEach(function (a) {
+      var v = el.getAttribute && el.getAttribute(a);
+      if (v) attrs[a] = v;
+    });
+    return {
+      label: "<" + tag + idPart + clsPart + ">",
+      tag: tag,
+      id: el.id || null,
+      text: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 160),
+      selector: this._cssPath(el),
+      component: this._resolveComponent(el),
+      source: this._sourceHint(el),
+      attributes: attrs
+    };
+  };
+
+  AgentBridgeWidget.prototype._cssPath = function (el) {
+    if (!el || el.nodeType !== 1) return "";
+    var parts = [];
+    while (el && el.nodeType === 1 && el !== document.body && parts.length < 6) {
+      var sel = el.nodeName.toLowerCase();
+      if (el.id) { parts.unshift(sel + "#" + el.id); break; }
+      var parent = el.parentNode;
+      if (parent) {
+        var sibs = Array.prototype.filter.call(parent.children, function (c) {
+          return c.nodeName === el.nodeName;
+        });
+        if (sibs.length > 1) sel += ":nth-of-type(" + (Array.prototype.indexOf.call(sibs, el) + 1) + ")";
+      }
+      parts.unshift(sel);
+      el = el.parentNode;
+    }
+    return parts.join(" > ");
+  };
+
+  // Best-effort: resolve the owning framework component name for a DOM node.
+  AgentBridgeWidget.prototype._resolveComponent = function (el) {
+    var node;
+    try {
+      if (window.ng && typeof window.ng.getComponent === "function") {
+        for (node = el; node; node = node.parentElement) {
+          var c = window.ng.getComponent(node);
+          if (c && c.constructor && c.constructor.name) return c.constructor.name;
+        }
+      }
+    } catch (e) {}
+    try { // Vue 3 / Vue 2
+      for (node = el; node; node = node.parentElement) {
+        var vc = node.__vueParentComponent;
+        if (vc && vc.type) { var nm = vc.type.__name || vc.type.name; if (nm) return nm; }
+        if (node.__vue__ && node.__vue__.$options && node.__vue__.$options.name) return node.__vue__.$options.name;
+      }
+    } catch (e) {}
+    try { // React fiber walk
+      var key = Object.keys(el).find(function (k) {
+        return k.indexOf("__reactFiber$") === 0 || k.indexOf("__reactInternalInstance$") === 0;
+      });
+      if (key) {
+        var fiber = el[key];
+        for (var d = 0; fiber && d < 40; d++, fiber = fiber.return) {
+          var t = fiber.type;
+          if (typeof t === "function") {
+            var rn = t.displayName || t.name;
+            if (rn && rn[0] === rn[0].toUpperCase()) return rn;
+          } else if (t && typeof t === "object") {
+            if (t.displayName) return t.displayName;
+            if (t.render && (t.render.displayName || t.render.name)) return t.render.displayName || t.render.name;
+          }
+        }
+      }
+    } catch (e) {}
+    return null;
+  };
+
+  // React dev builds attach __source/_debugSource (file + line) to fibers.
+  AgentBridgeWidget.prototype._sourceHint = function (el) {
+    try {
+      var key = Object.keys(el).find(function (k) { return k.indexOf("__reactFiber$") === 0; });
+      if (!key) return null;
+      var fiber = el[key];
+      for (var d = 0; fiber && d < 40; d++, fiber = fiber.return) {
+        var src = fiber._debugSource;
+        if (src && src.fileName) return { file: src.fileName, line: src.lineNumber || null };
+      }
+    } catch (e) {}
+    return null;
+  };
+
+  // ---- Pending-element chip --------------------------------------------- //
+
+  AgentBridgeWidget.prototype._setPendingElement = function (desc) {
+    this.pendingElement = desc;
+    this.contextBar.innerHTML = "";
+    var self = this;
+    var label = desc.component ? "‹" + desc.component + "› " + desc.label : desc.label;
+    var chip = h("span", { class: "ab-chip" }, [
+      h("span", { class: "ab-chip-icon", text: "🎯" }),
+      h("span", { class: "ab-chip-text", title: desc.selector, text: label }),
+    ]);
+    var x = h("button", { class: "ab-chip-x", title: "Remove", text: "✕" });
+    x.addEventListener("click", function () { self._clearPendingElement(); });
+    chip.appendChild(x);
+    this.contextBar.appendChild(chip);
+    this.contextBar.classList.add("show");
+  };
+
+  AgentBridgeWidget.prototype._clearPendingElement = function () {
+    this.pendingElement = null;
+    this.contextBar.innerHTML = "";
+    this.contextBar.classList.remove("show");
   };
 
   // ---- Rendering -------------------------------------------------------- //

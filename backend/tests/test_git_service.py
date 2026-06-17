@@ -41,6 +41,37 @@ def test_create_branch_dedupes(repo: Path):
     assert a != b and b == "agentbridge/x-2"
 
 
+def test_ensure_worktree_leaves_workspace_branch(repo: Path, monkeypatch):
+    monkeypatch.setenv("AGENTBRIDGE_WORKTREE_DIR", str(repo.parent / "wt"))
+    svc = GitService(repo)
+    path = svc.ensure_worktree("agentbridge/feature")
+    # Workspace stays on main; the worktree is a separate dir checked out to the new branch.
+    assert svc.current_branch() == "main"
+    assert path.is_dir() and (path / ".git").exists()
+    assert GitService(path).current_branch() == "agentbridge/feature"
+    # Idempotent: asking again returns the same worktree.
+    assert svc.ensure_worktree("agentbridge/feature") == path
+
+
+def test_migrate_uncommitted_to_relocates_changes(repo: Path, monkeypatch):
+    monkeypatch.setenv("AGENTBRIDGE_WORKTREE_DIR", str(repo.parent / "wt"))
+    svc = GitService(repo)
+    # Simulate the agent having edited files in place (live in the workspace).
+    (repo / "tracked_change.txt").write_text("edit")
+    (repo / "untracked.txt").write_text("new file")
+
+    path = svc.ensure_worktree("agentbridge/migrate")
+    moved = svc.migrate_uncommitted_to(path)
+
+    assert moved is True
+    # Changes were relocated onto the branch worktree...
+    assert (path / "tracked_change.txt").read_text() == "edit"
+    assert (path / "untracked.txt").read_text() == "new file"
+    # ...and the workspace is restored to clean (branch never switched).
+    assert not svc.has_uncommitted_changes()
+    assert svc.current_branch() == "main"
+
+
 def test_status_reports_changes(repo: Path):
     svc = GitService(repo)
     (repo / "new.txt").write_text("data")

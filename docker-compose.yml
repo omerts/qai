@@ -18,6 +18,9 @@ services:
       AGENTBRIDGE_HOST: 0.0.0.0
       AGENTBRIDGE_PORT: 8000
       AGENTBRIDGE_AGENT: ${AGENTBRIDGE_AGENT:-claude-code}
+      # Branch worktrees live on a named volume (off the workspace mount) so they persist
+      # across restarts without showing up as untracked files in the workspace.
+      AGENTBRIDGE_WORKTREE_DIR: /worktrees
       # Claude Code auth — use EITHER your Claude subscription OR an API key:
       #  - Subscription: run `claude setup-token` on the host and put the result in
       #    CLAUDE_CODE_OAUTH_TOKEN (no per-token API billing).
@@ -30,4 +33,9 @@ services:
       - ${WORKSPACE:?set WORKSPACE in .env to the absolute path of the repo to edit}:/workspace
       # Optional: reuse the host git identity for commits (read-only).
       - ${HOME}/.gitconfig:/root/.gitconfig:ro
+      # Branch worktrees the agent operates in (kept off the workspace mount).
+      - agentbridge-worktrees:/worktrees
     restart: unless-stopped
+
+volumes:
+  agentbridge-worktrees:

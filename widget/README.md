@@ -56,5 +56,26 @@ Override the CSS variables on the widget host if you want to match your brand
    and the agent waits for your answer (`agent_prompt` → `agent_response`).
 4. When the agent first edits a file on the base branch, the widget shows a **"Branch out?"**
    card — accepting it sends `create_branch`. You can also click **Branch** any time. Nothing
-   branches automatically.
-5. **Create PR** → commits, pushes, and opens a GitHub pull request; the link appears in chat.
+   branches automatically. This only *chooses* the branch name: the agent keeps editing in
+   the workspace (so your dev server's hot reload shows changes live), and the branch is
+   created server-side as a **git worktree** only at PR time.
+5. **Create PR** → relocates the in-place edits onto the chosen branch's worktree, commits,
+   pushes, and opens a GitHub pull request (your workspace branch stays untouched); the link
+   appears in chat.
+
+## Page context & element picker
+
+To help the agent understand what the user is looking at, every `user_message` carries a
+`context` object the widget collects from the host page:
+
+- **Page**: `url`, `route`, `title`, detected `framework` (React / Vue / Angular + version
+  where available), and a best-effort list of `components` on the page.
+- **Element** (optional): click the **crosshair button** to enter *inspect mode*, then click
+  any element in your app. The widget captures its tag, a CSS selector, text, and — where it
+  can resolve them — the owning **component name** (via the framework's runtime: Angular
+  `ng.getComponent`, Vue component handles, React fiber walk) and a **source file** hint
+  (React dev builds). The selection shows as a removable chip and is attached to your next
+  message, then cleared.
+
+All collection is best-effort and wrapped in try/catch — if a framework can't be probed, the
+fields are simply omitted. Detection runs only in the page the widget is embedded in.
