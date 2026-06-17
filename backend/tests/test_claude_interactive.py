@@ -98,3 +98,27 @@ async def test_interactive_deny_round_trip():
 async def test_resolve_unknown_prompt_is_noop():
     adapter = ClaudeCodeAdapter(Path("."))
     await adapter.resolve_prompt("does-not-exist", "Allow")  # must not raise
+
+
+def test_parser_tolerates_unknown_message_types():
+    """The CLI emits new control messages (e.g. rate_limit_event) that the pinned SDK's
+    parser doesn't recognize; we tolerate those instead of aborting the turn, but keep
+    raising on genuine parse failures."""
+    from agentbridge.agents.claude_code import _install_parser_tolerance
+    from claude_code_sdk._internal import message_parser as mp
+    from claude_code_sdk._errors import MessageParseError
+    from claude_code_sdk.types import SystemMessage
+
+    _install_parser_tolerance()
+
+    msg = mp.parse_message({"type": "rate_limit_event", "foo": 1})
+    assert isinstance(msg, SystemMessage)
+    assert msg.subtype == "rate_limit_event"
+
+    # A known type with a missing required field is a real error and must still raise.
+    with pytest.raises(MessageParseError):
+        mp.parse_message({"type": "result"})
+
+    # A message with no type at all is also a real error.
+    with pytest.raises(MessageParseError):
+        mp.parse_message({"foo": 1})

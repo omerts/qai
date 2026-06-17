@@ -39,6 +39,44 @@ def _sdk_installed() -> bool:
     return importlib.util.find_spec("claude_code_sdk") is not None
 
 
+# Top-level message types the pinned SDK's parser understands. The Claude Code CLI keeps
+# adding control/metadata messages (e.g. ``rate_limit_event``) that an older SDK doesn't
+# know about; its parser raises ``MessageParseError("Unknown message type: ...")`` mid-stream,
+# which would otherwise abort the whole turn. See :func:`_install_parser_tolerance`.
+_KNOWN_MESSAGE_TYPES = {"user", "assistant", "system", "result", "stream_event"}
+_parser_patched = False
+
+
+def _install_parser_tolerance() -> None:
+    """Make the SDK tolerate *unknown* top-level message types instead of raising.
+
+    Unrecognized messages (new CLI control events) become a benign ``SystemMessage`` that our
+    translator ignores. Genuine parse failures inside *known* message types still raise, so we
+    don't mask real bugs. Idempotent; safe to call when the SDK isn't installed.
+    """
+    global _parser_patched
+    if _parser_patched or not _sdk_installed():
+        return
+
+    from claude_code_sdk._internal import message_parser as _mp  # type: ignore
+    from claude_code_sdk._errors import MessageParseError  # type: ignore
+    from claude_code_sdk.types import SystemMessage  # type: ignore
+
+    _original_parse = _mp.parse_message
+
+    def _tolerant_parse(data):
+        try:
+            return _original_parse(data)
+        except MessageParseError:
+            mt = data.get("type") if isinstance(data, dict) else None
+            if isinstance(mt, str) and mt and mt not in _KNOWN_MESSAGE_TYPES:
+                return SystemMessage(subtype=mt, data=data)
+            raise
+
+    _mp.parse_message = _tolerant_parse
+    _parser_patched = True
+
+
 class ClaudeCodeAdapter(AgentAdapter):
     name = "claude-code"
     label = "Claude Code"
@@ -75,6 +113,8 @@ class ClaudeCodeAdapter(AgentAdapter):
 
         if not _sdk_installed():
             raise RuntimeError("claude-code-sdk is not installed. Run: pip install claude-code-sdk")
+
+        _install_parser_tolerance()
 
         from claude_code_sdk import ClaudeCodeOptions, ClaudeSDKClient  # type: ignore
 
