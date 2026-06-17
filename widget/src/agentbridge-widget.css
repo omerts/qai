@@ -27,6 +27,7 @@
 
 /* Launcher bubble */
 .ab-bubble {
+  position: relative;
   width: 56px; height: 56px;
   border-radius: 50%;
   background: var(--ab-accent);
@@ -39,6 +40,14 @@
 }
 .ab-bubble:hover { transform: scale(1.06); }
 .ab-bubble svg { width: 26px; height: 26px; }
+/* Offline badge on the collapsed bubble */
+.ab-bubble-badge {
+  display: none; position: absolute; top: 0; right: 0;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #ef4444; border: 2px solid var(--ab-accent-fg);
+}
+.ab-bubble.offline .ab-bubble-badge { display: block; }
+.ab-bubble.offline { background: #9ca3af; }
 
 /* Chat panel */
 .ab-panel {
@@ -66,8 +75,26 @@
 .ab-header .ab-title { font-weight: 600; font-size: 14px; flex: 1; }
 .ab-status-dot { width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; }
 .ab-status-dot.connected { background: #22c55e; }
+.ab-status-dot.down { background: #ef4444; }
 .ab-status-dot.working { background: #f59e0b; animation: ab-pulse 1s infinite; }
 @keyframes ab-pulse { 50% { opacity: .35; } }
+
+/* Connection banner (shown when the server is unreachable) */
+.ab-banner {
+  display: none; align-items: center; gap: 8px;
+  padding: 7px 12px; font-size: 12px;
+  background: #fef3c7; color: #92400e;
+  border-bottom: 1px solid var(--ab-border);
+}
+.ab-banner.show { display: flex; }
+.ab-banner.down { background: #fee2e2; color: #991b1b; }
+.ab-banner-text { flex: 1; }
+.ab-banner-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: ab-pulse 1s infinite; flex: none; }
+.ab-banner-retry {
+  border: 1px solid currentColor; background: transparent; color: inherit;
+  border-radius: 6px; padding: 2px 8px; cursor: pointer; font: inherit; font-size: 11px;
+}
+.ab-banner-retry:hover { background: rgba(0,0,0,.06); }
 .ab-iconbtn {
   background: none; border: none; cursor: pointer; color: var(--ab-muted);
   font-size: 18px; line-height: 1; padding: 4px;

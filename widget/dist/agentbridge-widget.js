@@ -19,7 +19,7 @@
 
   // The build step replaces this placeholder with the contents of agentbridge-widget.css.
   // When running un-built from /widget-src, we fall back to fetching the sibling .css.
-  var STYLES = "/* Styles for the AgentBridge widget. Injected into the widget's Shadow DOM, so these\n   selectors never leak into \u2014 or inherit from \u2014 the host application. */\n\n:host {\n  --ab-accent: #4f46e5;\n  --ab-accent-fg: #ffffff;\n  --ab-bg: #ffffff;\n  --ab-fg: #1f2329;\n  --ab-muted: #6b7280;\n  --ab-border: #e5e7eb;\n  --ab-surface: #f7f7f9;\n  --ab-radius: 14px;\n  --ab-font: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif;\n  --ab-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;\n}\n\n* { box-sizing: border-box; }\n\n.ab-root {\n  position: fixed;\n  z-index: 2147483000;\n  font-family: var(--ab-font);\n  color: var(--ab-fg);\n}\n.ab-root.bottom-right { right: 20px; bottom: 20px; }\n.ab-root.bottom-left { left: 20px; bottom: 20px; }\n\n/* Launcher bubble */\n.ab-bubble {\n  width: 56px; height: 56px;\n  border-radius: 50%;\n  background: var(--ab-accent);\n  color: var(--ab-accent-fg);\n  border: none;\n  cursor: pointer;\n  box-shadow: 0 6px 24px rgba(0,0,0,.22);\n  display: flex; align-items: center; justify-content: center;\n  transition: transform .15s ease;\n}\n.ab-bubble:hover { transform: scale(1.06); }\n.ab-bubble svg { width: 26px; height: 26px; }\n\n/* Chat panel */\n.ab-panel {\n  display: none;\n  flex-direction: column;\n  width: 380px;\n  max-width: calc(100vw - 32px);\n  height: 560px;\n  max-height: calc(100vh - 40px);\n  background: var(--ab-bg);\n  border: 1px solid var(--ab-border);\n  border-radius: var(--ab-radius);\n  box-shadow: 0 12px 48px rgba(0,0,0,.24);\n  overflow: hidden;\n}\n.ab-root.open .ab-panel { display: flex; }\n.ab-root.open .ab-bubble { display: none; }\n\n.ab-header {\n  display: flex; align-items: center; gap: 8px;\n  padding: 10px 12px;\n  background: var(--ab-surface);\n  border-bottom: 1px solid var(--ab-border);\n}\n.ab-header .ab-title { font-weight: 600; font-size: 14px; flex: 1; }\n.ab-status-dot { width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; }\n.ab-status-dot.connected { background: #22c55e; }\n.ab-status-dot.working { background: #f59e0b; animation: ab-pulse 1s infinite; }\n@keyframes ab-pulse { 50% { opacity: .35; } }\n.ab-iconbtn {\n  background: none; border: none; cursor: pointer; color: var(--ab-muted);\n  font-size: 18px; line-height: 1; padding: 4px;\n}\n.ab-iconbtn:disabled { opacity: .4; cursor: not-allowed; }\n.ab-input:disabled { opacity: .6; cursor: not-allowed; }\n\n/* Controls row (agent picker + branch) */\n.ab-controls {\n  display: flex; gap: 8px; align-items: center;\n  padding: 8px 12px;\n  border-bottom: 1px solid var(--ab-border);\n  flex-wrap: wrap;\n}\n.ab-select, .ab-btn {\n  font: inherit; font-size: 12px;\n  border: 1px solid var(--ab-border);\n  border-radius: 8px;\n  padding: 5px 8px;\n  background: var(--ab-bg);\n  color: var(--ab-fg);\n  cursor: pointer;\n}\n.ab-btn.primary { background: var(--ab-accent); color: var(--ab-accent-fg); border-color: var(--ab-accent); }\n.ab-btn:disabled { opacity: .5; cursor: not-allowed; }\n.ab-branch-label { font-size: 11px; color: var(--ab-muted); margin-left: auto; font-family: var(--ab-mono); }\n.ab-iconbtn.ab-inspect { display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; padding: 4px; }\n.ab-iconbtn.ab-inspect svg { width: 16px; height: 16px; }\n.ab-iconbtn.ab-inspect.active { color: var(--ab-accent-fg); background: var(--ab-accent); }\n\n/* Pending attached-element chip */\n.ab-context-bar { display: none; padding: 6px 12px 0; }\n.ab-context-bar.show { display: block; }\n.ab-chip {\n  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;\n  background: var(--ab-surface); border: 1px solid var(--ab-border);\n  border-radius: 999px; padding: 3px 6px 3px 10px; font-size: 12px;\n}\n.ab-chip-text {\n  font-family: var(--ab-mono); white-space: nowrap; overflow: hidden;\n  text-overflow: ellipsis; max-width: 260px;\n}\n.ab-chip-x {\n  border: none; background: rgba(0,0,0,.06); color: var(--ab-muted);\n  border-radius: 50%; width: 18px; height: 18px; cursor: pointer; line-height: 1; font-size: 11px;\n}\n\n/* Body wrapper holds the messages and the (overlaying) chat drawer */\n.ab-body { flex: 1; position: relative; display: flex; min-height: 0; }\n\n/* Messages */\n.ab-messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }\n.ab-empty { margin: auto; color: var(--ab-muted); font-size: 13px; text-align: center; padding: 0 24px; }\n\n/* Chat-list drawer (slides over the messages area) */\n.ab-drawer {\n  position: absolute; inset: 0; background: var(--ab-bg);\n  display: none; flex-direction: column; z-index: 5;\n}\n.ab-drawer.open { display: flex; }\n.ab-drawer-head { padding: 10px 12px; font-weight: 600; font-size: 13px; border-bottom: 1px solid var(--ab-border); color: var(--ab-muted); }\n.ab-drawer-list { flex: 1; overflow-y: auto; }\n.ab-drawer-empty { padding: 16px 12px; color: var(--ab-muted); font-size: 13px; }\n.ab-chat-item {\n  display: flex; align-items: center; gap: 8px;\n  padding: 9px 12px; border-bottom: 1px solid var(--ab-border); cursor: pointer;\n}\n.ab-chat-item:hover { background: var(--ab-surface); }\n.ab-chat-item.active { background: var(--ab-surface); border-left: 3px solid var(--ab-accent); }\n.ab-chat-main { flex: 1; min-width: 0; }\n.ab-chat-title { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\n.ab-chat-meta { font-size: 11px; color: var(--ab-muted); }\n.ab-chat-del { border: none; background: none; cursor: pointer; color: var(--ab-muted); font-size: 13px; padding: 4px; opacity: .6; }\n.ab-chat-del:hover { opacity: 1; }\n.ab-msg { max-width: 88%; padding: 8px 11px; border-radius: 12px; font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }\n.ab-msg.user { align-self: flex-end; background: var(--ab-accent); color: var(--ab-accent-fg); border-bottom-right-radius: 4px; }\n.ab-msg.agent { align-self: flex-start; background: var(--ab-surface); border-bottom-left-radius: 4px; }\n.ab-msg.agent.thinking { font-style: italic; color: var(--ab-muted); }\n.ab-msg.agent.stderr { color: #92400e; background: #fef3c7; font-size: 12px; }\n.ab-msg.error { align-self: stretch; background: #fee2e2; color: #991b1b; }\n.ab-msg.system { align-self: center; background: transparent; color: var(--ab-muted); font-size: 12px; }\n\n/* Branch suggestion / interactive prompt cards */\n.ab-card {\n  align-self: stretch;\n  border: 1px solid var(--ab-border);\n  border-left: 3px solid var(--ab-accent);\n  border-radius: 10px;\n  padding: 10px 12px;\n  background: var(--ab-surface);\n  font-size: 12px;\n}\n.ab-card .ab-card-title { font-weight: 600; margin-bottom: 4px; }\n.ab-card code { font-family: var(--ab-mono); background: rgba(0,0,0,.06); padding: 1px 5px; border-radius: 4px; }\n.ab-card .ab-card-actions { display: flex; gap: 8px; margin-top: 8px; }\n.ab-prompt-input { width: 100%; margin-top: 8px; }\n\n/* Changed files */\n.ab-files {\n  border-top: 1px solid var(--ab-border);\n  padding: 6px 12px; max-height: 110px; overflow-y: auto;\n  font-size: 12px; display: none;\n}\n.ab-files.show { display: block; }\n.ab-files .ab-files-head { color: var(--ab-muted); margin-bottom: 4px; }\n.ab-file { font-family: var(--ab-mono); font-size: 11px; display: flex; gap: 6px; }\n.ab-file .code { color: var(--ab-accent); width: 18px; }\n\n/* Composer */\n.ab-composer { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--ab-border); }\n.ab-input {\n  flex: 1; resize: none; font: inherit; font-size: 13px;\n  border: 1px solid var(--ab-border); border-radius: 10px; padding: 8px 10px;\n  max-height: 120px; color: var(--ab-fg); background: var(--ab-bg);\n}\n.ab-send {\n  border: none; background: var(--ab-accent); color: var(--ab-accent-fg);\n  border-radius: 10px; width: 40px; cursor: pointer; font-size: 16px;\n}\n.ab-send:disabled { opacity: .5; cursor: not-allowed; }\n";
+  var STYLES = "/* Styles for the AgentBridge widget. Injected into the widget's Shadow DOM, so these\n   selectors never leak into \u2014 or inherit from \u2014 the host application. */\n\n:host {\n  --ab-accent: #4f46e5;\n  --ab-accent-fg: #ffffff;\n  --ab-bg: #ffffff;\n  --ab-fg: #1f2329;\n  --ab-muted: #6b7280;\n  --ab-border: #e5e7eb;\n  --ab-surface: #f7f7f9;\n  --ab-radius: 14px;\n  --ab-font: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif;\n  --ab-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;\n}\n\n* { box-sizing: border-box; }\n\n.ab-root {\n  position: fixed;\n  z-index: 2147483000;\n  font-family: var(--ab-font);\n  color: var(--ab-fg);\n}\n.ab-root.bottom-right { right: 20px; bottom: 20px; }\n.ab-root.bottom-left { left: 20px; bottom: 20px; }\n\n/* Launcher bubble */\n.ab-bubble {\n  position: relative;\n  width: 56px; height: 56px;\n  border-radius: 50%;\n  background: var(--ab-accent);\n  color: var(--ab-accent-fg);\n  border: none;\n  cursor: pointer;\n  box-shadow: 0 6px 24px rgba(0,0,0,.22);\n  display: flex; align-items: center; justify-content: center;\n  transition: transform .15s ease;\n}\n.ab-bubble:hover { transform: scale(1.06); }\n.ab-bubble svg { width: 26px; height: 26px; }\n/* Offline badge on the collapsed bubble */\n.ab-bubble-badge {\n  display: none; position: absolute; top: 0; right: 0;\n  width: 14px; height: 14px; border-radius: 50%;\n  background: #ef4444; border: 2px solid var(--ab-accent-fg);\n}\n.ab-bubble.offline .ab-bubble-badge { display: block; }\n.ab-bubble.offline { background: #9ca3af; }\n\n/* Chat panel */\n.ab-panel {\n  display: none;\n  flex-direction: column;\n  width: 380px;\n  max-width: calc(100vw - 32px);\n  height: 560px;\n  max-height: calc(100vh - 40px);\n  background: var(--ab-bg);\n  border: 1px solid var(--ab-border);\n  border-radius: var(--ab-radius);\n  box-shadow: 0 12px 48px rgba(0,0,0,.24);\n  overflow: hidden;\n}\n.ab-root.open .ab-panel { display: flex; }\n.ab-root.open .ab-bubble { display: none; }\n\n.ab-header {\n  display: flex; align-items: center; gap: 8px;\n  padding: 10px 12px;\n  background: var(--ab-surface);\n  border-bottom: 1px solid var(--ab-border);\n}\n.ab-header .ab-title { font-weight: 600; font-size: 14px; flex: 1; }\n.ab-status-dot { width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; }\n.ab-status-dot.connected { background: #22c55e; }\n.ab-status-dot.down { background: #ef4444; }\n.ab-status-dot.working { background: #f59e0b; animation: ab-pulse 1s infinite; }\n@keyframes ab-pulse { 50% { opacity: .35; } }\n\n/* Connection banner (shown when the server is unreachable) */\n.ab-banner {\n  display: none; align-items: center; gap: 8px;\n  padding: 7px 12px; font-size: 12px;\n  background: #fef3c7; color: #92400e;\n  border-bottom: 1px solid var(--ab-border);\n}\n.ab-banner.show { display: flex; }\n.ab-banner.down { background: #fee2e2; color: #991b1b; }\n.ab-banner-text { flex: 1; }\n.ab-banner-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: ab-pulse 1s infinite; flex: none; }\n.ab-banner-retry {\n  border: 1px solid currentColor; background: transparent; color: inherit;\n  border-radius: 6px; padding: 2px 8px; cursor: pointer; font: inherit; font-size: 11px;\n}\n.ab-banner-retry:hover { background: rgba(0,0,0,.06); }\n.ab-iconbtn {\n  background: none; border: none; cursor: pointer; color: var(--ab-muted);\n  font-size: 18px; line-height: 1; padding: 4px;\n}\n.ab-iconbtn:disabled { opacity: .4; cursor: not-allowed; }\n.ab-input:disabled { opacity: .6; cursor: not-allowed; }\n\n/* Controls row (agent picker + branch) */\n.ab-controls {\n  display: flex; gap: 8px; align-items: center;\n  padding: 8px 12px;\n  border-bottom: 1px solid var(--ab-border);\n  flex-wrap: wrap;\n}\n.ab-select, .ab-btn {\n  font: inherit; font-size: 12px;\n  border: 1px solid var(--ab-border);\n  border-radius: 8px;\n  padding: 5px 8px;\n  background: var(--ab-bg);\n  color: var(--ab-fg);\n  cursor: pointer;\n}\n.ab-btn.primary { background: var(--ab-accent); color: var(--ab-accent-fg); border-color: var(--ab-accent); }\n.ab-btn:disabled { opacity: .5; cursor: not-allowed; }\n.ab-branch-label { font-size: 11px; color: var(--ab-muted); margin-left: auto; font-family: var(--ab-mono); }\n.ab-iconbtn.ab-inspect { display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; padding: 4px; }\n.ab-iconbtn.ab-inspect svg { width: 16px; height: 16px; }\n.ab-iconbtn.ab-inspect.active { color: var(--ab-accent-fg); background: var(--ab-accent); }\n\n/* Pending attached-element chip */\n.ab-context-bar { display: none; padding: 6px 12px 0; }\n.ab-context-bar.show { display: block; }\n.ab-chip {\n  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;\n  background: var(--ab-surface); border: 1px solid var(--ab-border);\n  border-radius: 999px; padding: 3px 6px 3px 10px; font-size: 12px;\n}\n.ab-chip-text {\n  font-family: var(--ab-mono); white-space: nowrap; overflow: hidden;\n  text-overflow: ellipsis; max-width: 260px;\n}\n.ab-chip-x {\n  border: none; background: rgba(0,0,0,.06); color: var(--ab-muted);\n  border-radius: 50%; width: 18px; height: 18px; cursor: pointer; line-height: 1; font-size: 11px;\n}\n\n/* Body wrapper holds the messages and the (overlaying) chat drawer */\n.ab-body { flex: 1; position: relative; display: flex; min-height: 0; }\n\n/* Messages */\n.ab-messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }\n.ab-empty { margin: auto; color: var(--ab-muted); font-size: 13px; text-align: center; padding: 0 24px; }\n\n/* Chat-list drawer (slides over the messages area) */\n.ab-drawer {\n  position: absolute; inset: 0; background: var(--ab-bg);\n  display: none; flex-direction: column; z-index: 5;\n}\n.ab-drawer.open { display: flex; }\n.ab-drawer-head { padding: 10px 12px; font-weight: 600; font-size: 13px; border-bottom: 1px solid var(--ab-border); color: var(--ab-muted); }\n.ab-drawer-list { flex: 1; overflow-y: auto; }\n.ab-drawer-empty { padding: 16px 12px; color: var(--ab-muted); font-size: 13px; }\n.ab-chat-item {\n  display: flex; align-items: center; gap: 8px;\n  padding: 9px 12px; border-bottom: 1px solid var(--ab-border); cursor: pointer;\n}\n.ab-chat-item:hover { background: var(--ab-surface); }\n.ab-chat-item.active { background: var(--ab-surface); border-left: 3px solid var(--ab-accent); }\n.ab-chat-main { flex: 1; min-width: 0; }\n.ab-chat-title { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\n.ab-chat-meta { font-size: 11px; color: var(--ab-muted); }\n.ab-chat-del { border: none; background: none; cursor: pointer; color: var(--ab-muted); font-size: 13px; padding: 4px; opacity: .6; }\n.ab-chat-del:hover { opacity: 1; }\n.ab-msg { max-width: 88%; padding: 8px 11px; border-radius: 12px; font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }\n.ab-msg.user { align-self: flex-end; background: var(--ab-accent); color: var(--ab-accent-fg); border-bottom-right-radius: 4px; }\n.ab-msg.agent { align-self: flex-start; background: var(--ab-surface); border-bottom-left-radius: 4px; }\n.ab-msg.agent.thinking { font-style: italic; color: var(--ab-muted); }\n.ab-msg.agent.stderr { color: #92400e; background: #fef3c7; font-size: 12px; }\n.ab-msg.error { align-self: stretch; background: #fee2e2; color: #991b1b; }\n.ab-msg.system { align-self: center; background: transparent; color: var(--ab-muted); font-size: 12px; }\n\n/* Branch suggestion / interactive prompt cards */\n.ab-card {\n  align-self: stretch;\n  border: 1px solid var(--ab-border);\n  border-left: 3px solid var(--ab-accent);\n  border-radius: 10px;\n  padding: 10px 12px;\n  background: var(--ab-surface);\n  font-size: 12px;\n}\n.ab-card .ab-card-title { font-weight: 600; margin-bottom: 4px; }\n.ab-card code { font-family: var(--ab-mono); background: rgba(0,0,0,.06); padding: 1px 5px; border-radius: 4px; }\n.ab-card .ab-card-actions { display: flex; gap: 8px; margin-top: 8px; }\n.ab-prompt-input { width: 100%; margin-top: 8px; }\n\n/* Changed files */\n.ab-files {\n  border-top: 1px solid var(--ab-border);\n  padding: 6px 12px; max-height: 110px; overflow-y: auto;\n  font-size: 12px; display: none;\n}\n.ab-files.show { display: block; }\n.ab-files .ab-files-head { color: var(--ab-muted); margin-bottom: 4px; }\n.ab-file { font-family: var(--ab-mono); font-size: 11px; display: flex; gap: 6px; }\n.ab-file .code { color: var(--ab-accent); width: 18px; }\n\n/* Composer */\n.ab-composer { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--ab-border); }\n.ab-input {\n  flex: 1; resize: none; font: inherit; font-size: 13px;\n  border: 1px solid var(--ab-border); border-radius: 10px; padding: 8px 10px;\n  max-height: 120px; color: var(--ab-fg); background: var(--ab-bg);\n}\n.ab-send {\n  border: none; background: var(--ab-accent); color: var(--ab-accent-fg);\n  border-radius: 10px; width: 40px; cursor: pointer; font-size: 16px;\n}\n.ab-send:disabled { opacity: .5; cursor: not-allowed; }\n";
 
   var ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
   // Crosshair "select element" icon (devtools-style inspector).
@@ -59,6 +59,9 @@
     this.targetBranch = null;
     this.currentAgentMsg = null; // accumulating agent bubble for the active turn
     this.reconnectDelay = 1000;
+    this.connState = "connecting"; // connecting | connected | down
+    this._everConnected = false;
+    this._reconnectTimer = null;
     this.pendingElement = null;  // element picked via the inspector, attached to next msg
     this._inspecting = false;
     this._autoOpened = false;
@@ -91,9 +94,11 @@
 
     this.root = h("div", { class: "ab-root " + this.position });
 
-    // Launcher bubble
+    // Launcher bubble (with an offline badge shown when the server is unreachable)
     this.bubble = h("button", { class: "ab-bubble", title: "Ask a coding agent", "aria-label": "Open agent chat" });
     this.bubble.innerHTML = ICON;
+    this.bubbleBadge = h("span", { class: "ab-bubble-badge", title: "Agent server offline" });
+    this.bubble.appendChild(this.bubbleBadge);
     this.bubble.addEventListener("click", function () { self._toggle(true); });
 
     // Header: menu (chat list) · title · status · new chat · close
@@ -154,13 +159,21 @@
     this.sendBtn.addEventListener("click", function () { self._sendMessage(); });
     var composer = h("div", { class: "ab-composer" }, [this.input, this.sendBtn]);
 
+    // Connection banner (shown when not connected to the server)
+    this.bannerText = h("span", { class: "ab-banner-text" });
+    this.bannerRetry = h("button", { class: "ab-banner-retry", text: "Retry now" });
+    this.bannerRetry.addEventListener("click", function () { self._retryNow(); });
+    this.banner = h("div", { class: "ab-banner" }, [
+      h("span", { class: "ab-banner-dot" }), this.bannerText, this.bannerRetry,
+    ]);
+
     var body = h("div", { class: "ab-body" }, [this.messages, this.drawer]);
-    var panel = h("div", { class: "ab-panel" }, [header, controls, body, this.files, this.contextBar, composer]);
+    var panel = h("div", { class: "ab-panel" }, [header, this.banner, controls, body, this.files, this.contextBar, composer]);
     this.root.appendChild(this.bubble);
     this.root.appendChild(panel);
     this.shadow.appendChild(this.root);
 
-    this._setConnected(false);
+    this._setConnState("connecting");
     this._setChatActive(false);
   };
 
@@ -180,16 +193,21 @@
 
   AgentBridgeWidget.prototype._connect = function () {
     var self = this;
+    if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
+    this._setConnState(this._everConnected ? "down" : "connecting");
+
     try {
       this.ws = new WebSocket(this.server);
     } catch (e) {
-      this._system("Could not connect to " + this.server);
+      // Bad URL / blocked: keep retrying with backoff instead of giving up silently.
+      this._scheduleReconnect();
       return;
     }
     this.ws.addEventListener("open", function () {
       self.connected = true;
+      self._everConnected = true;
       self.reconnectDelay = 1000;
-      self.statusDot.classList.add("connected");
+      self._setConnState("connected");
       self._setConnected(true);
       self._autoOpened = false;
       self._send({ type: "list_agents" });
@@ -202,12 +220,50 @@
     });
     this.ws.addEventListener("close", function () {
       self.connected = false;
-      self.statusDot.classList.remove("connected", "working");
+      self._setConnState("down");
       self._setConnected(false);
-      setTimeout(function () { self._connect(); }, self.reconnectDelay);
-      self.reconnectDelay = Math.min(self.reconnectDelay * 2, 15000);
+      self._scheduleReconnect();
     });
     this.ws.addEventListener("error", function () { try { self.ws.close(); } catch (e) {} });
+  };
+
+  AgentBridgeWidget.prototype._scheduleReconnect = function () {
+    var self = this;
+    if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
+    this._reconnectTimer = setTimeout(function () { self._connect(); }, this.reconnectDelay);
+    this.reconnectDelay = Math.min(this.reconnectDelay * 2, 15000);
+  };
+
+  // User-triggered "Retry now" — reconnect immediately instead of waiting out the backoff.
+  AgentBridgeWidget.prototype._retryNow = function () {
+    if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
+    this.reconnectDelay = 1000;
+    try { if (this.ws) this.ws.close(); } catch (e) {}
+    this._connect();
+  };
+
+  // Reflect connection state in the dot, the banner, the bubble badge, and controls.
+  AgentBridgeWidget.prototype._setConnState = function (state) {
+    this.connState = state;
+    var connected = state === "connected";
+    this.statusDot.classList.toggle("connected", connected);
+    this.statusDot.classList.toggle("down", state === "down");
+    if (!connected) this.statusDot.classList.remove("working");
+
+    this.banner.classList.toggle("show", !connected);
+    this.banner.classList.toggle("down", state === "down");
+    if (!connected) {
+      this.bannerText.textContent = state === "down"
+        ? "Can't reach the agent server — reconnecting…"
+        : "Connecting to the agent server…";
+      // Only offer a manual retry once we've actually failed (not on the first attempt).
+      this.bannerRetry.style.display = state === "down" ? "" : "none";
+    }
+
+    this.bubble.classList.toggle("offline", !connected);
+    this.bubble.title = connected
+      ? "Ask a coding agent"
+      : "Agent server unavailable — reconnecting";
   };
 
   AgentBridgeWidget.prototype._send = function (obj) {

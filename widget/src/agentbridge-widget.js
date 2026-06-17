@@ -59,6 +59,9 @@
     this.targetBranch = null;
     this.currentAgentMsg = null; // accumulating agent bubble for the active turn
     this.reconnectDelay = 1000;
+    this.connState = "connecting"; // connecting | connected | down
+    this._everConnected = false;
+    this._reconnectTimer = null;
     this.pendingElement = null;  // element picked via the inspector, attached to next msg
     this._inspecting = false;
     this._autoOpened = false;
@@ -91,9 +94,11 @@
 
     this.root = h("div", { class: "ab-root " + this.position });
 
-    // Launcher bubble
+    // Launcher bubble (with an offline badge shown when the server is unreachable)
     this.bubble = h("button", { class: "ab-bubble", title: "Ask a coding agent", "aria-label": "Open agent chat" });
     this.bubble.innerHTML = ICON;
+    this.bubbleBadge = h("span", { class: "ab-bubble-badge", title: "Agent server offline" });
+    this.bubble.appendChild(this.bubbleBadge);
     this.bubble.addEventListener("click", function () { self._toggle(true); });
 
     // Header: menu (chat list) · title · status · new chat · close
@@ -154,13 +159,21 @@
     this.sendBtn.addEventListener("click", function () { self._sendMessage(); });
     var composer = h("div", { class: "ab-composer" }, [this.input, this.sendBtn]);
 
+    // Connection banner (shown when not connected to the server)
+    this.bannerText = h("span", { class: "ab-banner-text" });
+    this.bannerRetry = h("button", { class: "ab-banner-retry", text: "Retry now" });
+    this.bannerRetry.addEventListener("click", function () { self._retryNow(); });
+    this.banner = h("div", { class: "ab-banner" }, [
+      h("span", { class: "ab-banner-dot" }), this.bannerText, this.bannerRetry,
+    ]);
+
     var body = h("div", { class: "ab-body" }, [this.messages, this.drawer]);
-    var panel = h("div", { class: "ab-panel" }, [header, controls, body, this.files, this.contextBar, composer]);
+    var panel = h("div", { class: "ab-panel" }, [header, this.banner, controls, body, this.files, this.contextBar, composer]);
     this.root.appendChild(this.bubble);
     this.root.appendChild(panel);
     this.shadow.appendChild(this.root);
 
-    this._setConnected(false);
+    this._setConnState("connecting");
     this._setChatActive(false);
   };
 
@@ -180,16 +193,21 @@
 
   AgentBridgeWidget.prototype._connect = function () {
     var self = this;
+    if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
+    this._setConnState(this._everConnected ? "down" : "connecting");
+
     try {
       this.ws = new WebSocket(this.server);
     } catch (e) {
-      this._system("Could not connect to " + this.server);
+      // Bad URL / blocked: keep retrying with backoff instead of giving up silently.
+      this._scheduleReconnect();
       return;
     }
     this.ws.addEventListener("open", function () {
       self.connected = true;
+      self._everConnected = true;
       self.reconnectDelay = 1000;
-      self.statusDot.classList.add("connected");
+      self._setConnState("connected");
       self._setConnected(true);
       self._autoOpened = false;
       self._send({ type: "list_agents" });
@@ -202,12 +220,50 @@
     });
     this.ws.addEventListener("close", function () {
       self.connected = false;
-      self.statusDot.classList.remove("connected", "working");
+      self._setConnState("down");
       self._setConnected(false);
-      setTimeout(function () { self._connect(); }, self.reconnectDelay);
-      self.reconnectDelay = Math.min(self.reconnectDelay * 2, 15000);
+      self._scheduleReconnect();
     });
     this.ws.addEventListener("error", function () { try { self.ws.close(); } catch (e) {} });
+  };
+
+  AgentBridgeWidget.prototype._scheduleReconnect = function () {
+    var self = this;
+    if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
+    this._reconnectTimer = setTimeout(function () { self._connect(); }, this.reconnectDelay);
+    this.reconnectDelay = Math.min(this.reconnectDelay * 2, 15000);
+  };
+
+  // User-triggered "Retry now" — reconnect immediately instead of waiting out the backoff.
+  AgentBridgeWidget.prototype._retryNow = function () {
+    if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
+    this.reconnectDelay = 1000;
+    try { if (this.ws) this.ws.close(); } catch (e) {}
+    this._connect();
+  };
+
+  // Reflect connection state in the dot, the banner, the bubble badge, and controls.
+  AgentBridgeWidget.prototype._setConnState = function (state) {
+    this.connState = state;
+    var connected = state === "connected";
+    this.statusDot.classList.toggle("connected", connected);
+    this.statusDot.classList.toggle("down", state === "down");
+    if (!connected) this.statusDot.classList.remove("working");
+
+    this.banner.classList.toggle("show", !connected);
+    this.banner.classList.toggle("down", state === "down");
+    if (!connected) {
+      this.bannerText.textContent = state === "down"
+        ? "Can't reach the agent server — reconnecting…"
+        : "Connecting to the agent server…";
+      // Only offer a manual retry once we've actually failed (not on the first attempt).
+      this.bannerRetry.style.display = state === "down" ? "" : "none";
+    }
+
+    this.bubble.classList.toggle("offline", !connected);
+    this.bubble.title = connected
+      ? "Ask a coding agent"
+      : "Agent server unavailable — reconnecting";
   };
 
   AgentBridgeWidget.prototype._send = function (obj) {
