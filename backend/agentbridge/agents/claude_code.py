@@ -1,6 +1,6 @@
-"""Claude Code adapter, driven via the ``claude-code-sdk`` Python package.
+"""Claude Code adapter, driven via the ``claude-agent-sdk`` Python package.
 
-Install with: ``pip install agentbridge[claude]`` (or ``pip install claude-code-sdk``).
+Install with: ``pip install agentbridge[claude]`` (or ``pip install claude-agent-sdk``).
 
 This adapter uses :class:`ClaudeSDKClient` (a persistent, streaming session) rather than
 the one-shot ``query()`` helper, for two reasons:
@@ -46,10 +46,11 @@ from .base import AgentAdapter, AgentEvent, Capabilities, SessionContext
 _DEFAULT_SETTING_SOURCES = "user,project"
 
 
-def _setting_sources() -> str | None:
-    raw = os.environ.get("AGENTBRIDGE_CLAUDE_SETTING_SOURCES", _DEFAULT_SETTING_SOURCES)
-    raw = raw.strip()
-    return raw or None
+def _setting_sources() -> list[str] | None:
+    raw = os.environ.get("AGENTBRIDGE_CLAUDE_SETTING_SOURCES", _DEFAULT_SETTING_SOURCES).strip()
+    if not raw:
+        return None  # empty -> let the SDK use its default (loads no filesystem settings)
+    return [s.strip() for s in raw.split(",") if s.strip()]
 
 # Tools that should ask the user before running. Read-only tools are auto-approved by the
 # SDK and never reach our callback; these are the ones worth a confirmation.
@@ -85,7 +86,7 @@ def _is_risky_bash(command: str) -> bool:
 
 
 def _sdk_installed() -> bool:
-    return importlib.util.find_spec("claude_code_sdk") is not None
+    return importlib.util.find_spec("claude_agent_sdk") is not None
 
 
 # Top-level message types the pinned SDK's parser understands. The Claude Code CLI keeps
@@ -107,9 +108,9 @@ def _install_parser_tolerance() -> None:
     if _parser_patched or not _sdk_installed():
         return
 
-    from claude_code_sdk._internal import message_parser as _mp  # type: ignore
-    from claude_code_sdk._errors import MessageParseError  # type: ignore
-    from claude_code_sdk.types import SystemMessage  # type: ignore
+    from claude_agent_sdk._internal import message_parser as _mp  # type: ignore
+    from claude_agent_sdk._errors import MessageParseError  # type: ignore
+    from claude_agent_sdk.types import SystemMessage  # type: ignore
 
     _original_parse = _mp.parse_message
 
@@ -163,25 +164,20 @@ class ClaudeCodeAdapter(AgentAdapter):
             )
 
         if not _sdk_installed():
-            raise RuntimeError("claude-code-sdk is not installed. Run: pip install claude-code-sdk")
+            raise RuntimeError("claude-agent-sdk is not installed. Run: pip install claude-agent-sdk")
 
         _install_parser_tolerance()
 
-        from claude_code_sdk import ClaudeCodeOptions, ClaudeSDKClient  # type: ignore
+        from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient  # type: ignore
 
-        # Opt in to loading the workspace's Claude Code settings (see _setting_sources).
-        # Passed as a raw CLI flag because this SDK version has no setting_sources field.
-        extra_args: dict[str, str | None] = {}
-        sources = _setting_sources()
-        if sources:
-            extra_args["setting-sources"] = sources
-
-        options = ClaudeCodeOptions(
+        options = ClaudeAgentOptions(
             cwd=str(self.workspace),
             permission_mode="default",  # 'default' => edits/bash route through can_use_tool
             can_use_tool=self._can_use_tool,
             resume=self._resume,  # continue a prior conversation when reopening a chat
-            extra_args=extra_args,
+            # Which settings to load from disk (see _setting_sources); defaults to user,project
+            # so we never read or write the workspace's .claude/settings.local.json.
+            setting_sources=_setting_sources(),
         )
         return ClaudeSDKClient(options=options)
 
@@ -196,7 +192,7 @@ class ClaudeCodeAdapter(AgentAdapter):
     # ------------------------------------------------------------------ #
 
     async def _can_use_tool(self, tool_name: str, tool_input: dict, context: Any):
-        from claude_code_sdk import PermissionResultAllow, PermissionResultDeny  # type: ignore
+        from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny  # type: ignore
 
         name = tool_name.lower()
 

@@ -35,7 +35,7 @@ AgentBridge has three parts:
 ```bash
 cd backend
 python -m venv .venv && . .venv/bin/activate
-pip install -e ".[claude,dev]"          # 'claude' pulls the Claude Code SDK; omit if unused
+pip install -e ".[claude,dev]"          # 'claude' pulls the Claude Agent SDK; omit if unused
 
 # Point it at the repo you want the agent to edit (defaults to the current directory):
 AGENTBRIDGE_WORKSPACE=/path/to/your/repo agentbridge
@@ -91,7 +91,7 @@ plain HTML).
 
 | Agent        | Driver                                   | Status        |
 | ------------ | ---------------------------------------- | ------------- |
-| Claude Code  | `claude-code-sdk` (`ClaudeSDKClient`)    | ✅ implemented |
+| Claude Code  | `claude-agent-sdk` (`ClaudeSDKClient`)   | ✅ implemented |
 | Cursor       | `cursor-agent` CLI (`stream-json`)       | ✅ implemented |
 | Aider        | Python `Coder` API                       | 🚧 stub        |
 | Copilot      | `gh copilot` / Copilot CLI               | 🚧 stub        |

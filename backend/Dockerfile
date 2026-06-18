@@ -1,7 +1,7 @@
 # AgentBridge backend image.
 #
 # Ships the FastAPI server, git, and the Claude Code CLI (the agent the backend drives via
-# claude-code-sdk). The repo you want the agent to edit is mounted at /workspace at run
+# claude-agent-sdk). The repo you want the agent to edit is mounted at /workspace at run
 # time — see docker-compose.yml.
 #
 # NOTE: build context is the REPOSITORY ROOT (not backend/), so the widget bundle can be
@@ -11,14 +11,16 @@ FROM python:3.12-slim
 
 # - git: all branch/commit/push operations run against the mounted workspace
 # - curl/ca-certificates: TLS + tooling
-# - nodejs/npm: required by the Claude Code CLI that claude-code-sdk spawns
+# - nodejs/npm: required by the Claude Code CLI that claude-agent-sdk spawns
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git curl ca-certificates nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Claude Code CLI (the binary the SDK shells out to). Authenticate at runtime with
-# ANTHROPIC_API_KEY.
-RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force
+# ANTHROPIC_API_KEY. Pinned to the 2.x line to stay protocol-compatible with the
+# claude-agent-sdk pinned in backend/pyproject.toml — the SDK and CLI must move together
+# (a mismatched pair fails every permission check with a Zod validation error).
+RUN npm install -g @anthropic-ai/claude-code@2 && npm cache clean --force
 
 WORKDIR /app
 

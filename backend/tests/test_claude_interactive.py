@@ -1,7 +1,7 @@
 """Interactive permission round-trip for the Claude Code adapter.
 
 Uses an injected fake client (no real SDK/CLI run) that calls the adapter's can_use_tool
-callback mid-stream, exactly as ClaudeSDKClient does. Requires claude-code-sdk only for
+callback mid-stream, exactly as ClaudeSDKClient does. Requires claude-agent-sdk only for
 its PermissionResult types, which the adapter returns from the callback.
 """
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("claude_code_sdk")
+pytest.importorskip("claude_agent_sdk")
 
 from agentbridge.agents.base import SessionContext
 from agentbridge.agents.claude_code import ClaudeCodeAdapter
@@ -105,9 +105,9 @@ def test_parser_tolerates_unknown_message_types():
     parser doesn't recognize; we tolerate those instead of aborting the turn, but keep
     raising on genuine parse failures."""
     from agentbridge.agents.claude_code import _install_parser_tolerance
-    from claude_code_sdk._internal import message_parser as mp
-    from claude_code_sdk._errors import MessageParseError
-    from claude_code_sdk.types import SystemMessage
+    from claude_agent_sdk._internal import message_parser as mp
+    from claude_agent_sdk._errors import MessageParseError
+    from claude_agent_sdk.types import SystemMessage
 
     _install_parser_tolerance()
 
@@ -194,19 +194,19 @@ def test_setting_sources_default_and_env(monkeypatch):
     # Default omits 'local' so the agent never reads or writes the workspace's
     # .claude/settings.local.json (no .claude files left in the user's workspace).
     monkeypatch.delenv("AGENTBRIDGE_CLAUDE_SETTING_SOURCES", raising=False)
-    assert _setting_sources() == "user,project"
+    assert _setting_sources() == ["user", "project"]
 
     monkeypatch.setenv("AGENTBRIDGE_CLAUDE_SETTING_SOURCES", "project")
-    assert _setting_sources() == "project"
+    assert _setting_sources() == ["project"]
 
-    # Empty -> None: fall back to the CLI's own default.
+    # Empty -> None: fall back to the SDK's own default.
     monkeypatch.setenv("AGENTBRIDGE_CLAUDE_SETTING_SOURCES", "   ")
     assert _setting_sources() is None
 
 
 def test_make_client_loads_workspace_settings(monkeypatch):
-    """The real-client path must tell the CLI to load workspace settings, rooted at cwd."""
-    import claude_code_sdk
+    """The real-client path must tell the SDK to load workspace settings, rooted at cwd."""
+    import claude_agent_sdk
 
     captured = {}
 
@@ -214,7 +214,7 @@ def test_make_client_loads_workspace_settings(monkeypatch):
         def __init__(self, options=None):
             captured["options"] = options
 
-    monkeypatch.setattr(claude_code_sdk, "ClaudeSDKClient", _Capture)
+    monkeypatch.setattr(claude_agent_sdk, "ClaudeSDKClient", _Capture)
     monkeypatch.delenv("AGENTBRIDGE_CLAUDE_SETTING_SOURCES", raising=False)
     ClaudeCodeAdapter.client_factory = None
 
@@ -223,11 +223,12 @@ def test_make_client_loads_workspace_settings(monkeypatch):
 
     opts = captured["options"]
     assert str(opts.cwd) == "/tmp/some-workspace"
-    assert opts.extra_args.get("setting-sources") == "user,project"
+    # Default omits 'local' so no .claude/settings.local.json is read or written.
+    assert opts.setting_sources == ["user", "project"]
 
 
-def test_make_client_omits_flag_when_sources_empty(monkeypatch):
-    import claude_code_sdk
+def test_make_client_omits_sources_when_empty(monkeypatch):
+    import claude_agent_sdk
 
     captured = {}
 
@@ -235,11 +236,12 @@ def test_make_client_omits_flag_when_sources_empty(monkeypatch):
         def __init__(self, options=None):
             captured["options"] = options
 
-    monkeypatch.setattr(claude_code_sdk, "ClaudeSDKClient", _Capture)
+    monkeypatch.setattr(claude_agent_sdk, "ClaudeSDKClient", _Capture)
     monkeypatch.setenv("AGENTBRIDGE_CLAUDE_SETTING_SOURCES", "")
     ClaudeCodeAdapter.client_factory = None
 
     adapter = ClaudeCodeAdapter(Path("."))
     adapter._make_client()
 
-    assert "setting-sources" not in captured["options"].extra_args
+    # Empty -> None: let the SDK use its own default (loads no filesystem settings).
+    assert captured["options"].setting_sources is None

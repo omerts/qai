@@ -14,8 +14,11 @@ dependencies = [
 
 [project.optional-dependencies]
 # Real agent integrations. Install the ones you have access to.
-# ClaudeSDKClient + can_use_tool (interactive permissions) require a recent SDK.
-claude = ["claude-code-sdk>=0.0.20"]
+# Use the maintained Agent SDK: the old `claude-code-sdk` froze at 0.0.25 and is
+# incompatible with the 2.x Claude Code CLI's permission/control protocol (every tool
+# call fails Zod validation). Keep this in the same generation as the CLI pinned in the
+# Dockerfile. ClaudeSDKClient + can_use_tool (interactive permissions) live here.
+claude = ["claude-agent-sdk>=0.2,<0.3"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
 [project.scripts]
