@@ -191,8 +191,10 @@ async def test_auto_approve_off_prompts_for_edits():
 def test_setting_sources_default_and_env(monkeypatch):
     from agentbridge.agents.claude_code import _setting_sources
 
+    # Default omits 'local' so the agent never reads or writes the workspace's
+    # .claude/settings.local.json (no .claude files left in the user's workspace).
     monkeypatch.delenv("AGENTBRIDGE_CLAUDE_SETTING_SOURCES", raising=False)
-    assert _setting_sources() == "user,project,local"
+    assert _setting_sources() == "user,project"
 
     monkeypatch.setenv("AGENTBRIDGE_CLAUDE_SETTING_SOURCES", "project")
     assert _setting_sources() == "project"
@@ -221,7 +223,7 @@ def test_make_client_loads_workspace_settings(monkeypatch):
 
     opts = captured["options"]
     assert str(opts.cwd) == "/tmp/some-workspace"
-    assert opts.extra_args.get("setting-sources") == "user,project,local"
+    assert opts.extra_args.get("setting-sources") == "user,project"
 
 
 def test_make_client_omits_flag_when_sources_empty(monkeypatch):

@@ -32,12 +32,18 @@ from typing import Any, AsyncIterator, Callable
 from .base import AgentAdapter, AgentEvent, Capabilities, SessionContext
 
 # Which settings the Claude Code CLI should load from disk. In ``--print`` (SDK) mode the CLI
-# does NOT read project/local filesystem settings unless told to, so we opt in explicitly:
-# this is what makes the workspace's .claude/settings.json, .claude/settings.local.json,
-# .mcp.json, hooks, agents, and CLAUDE.md take effect (plus the developer's own user
-# settings). Override with AGENTBRIDGE_CLAUDE_SETTING_SOURCES (comma-separated subset of
-# user,project,local) or set it empty to fall back to the CLI default.
-_DEFAULT_SETTING_SOURCES = "user,project,local"
+# does NOT read filesystem settings unless told to, so we opt in explicitly: this is what
+# makes the workspace's .claude/settings.json, .mcp.json, hooks, agents, and CLAUDE.md take
+# effect (plus the developer's own user settings).
+#
+# We deliberately omit the ``local`` source (.claude/settings.local.json). That file is a
+# per-user, machine-local permission cache the CLI *writes* to when it's an active source;
+# excluding it keeps AgentBridge from reading or creating any .claude file in the user's
+# workspace. Approvals here flow through the can_use_tool callback at runtime instead, so
+# nothing is persisted to disk. Override with AGENTBRIDGE_CLAUDE_SETTING_SOURCES (a
+# comma-separated subset of user,project,local) or set it empty to fall back to the CLI
+# default — add ``local`` back only if you want the workspace's local settings to apply.
+_DEFAULT_SETTING_SOURCES = "user,project"
 
 
 def _setting_sources() -> str | None:

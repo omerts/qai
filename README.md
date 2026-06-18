@@ -51,7 +51,7 @@ Configuration (all optional, via env vars):
 | `AGENTBRIDGE_PORT`       | `8000`        | Bind port                                |
 | `AGENTBRIDGE_WORKTREE_DIR`| `<repo>/../.agentbridge-worktrees` | Where branch worktrees are created |
 | `AGENTBRIDGE_STATE_DIR`  | `~/.agentbridge` | Where chat history is persisted (per workspace) |
-| `AGENTBRIDGE_CLAUDE_SETTING_SOURCES` | `user,project,local` | Which Claude Code settings to load from disk (empty = CLI default) |
+| `AGENTBRIDGE_CLAUDE_SETTING_SOURCES` | `user,project` | Which Claude Code settings to load from disk (`local` omitted so no `.claude` files are written into your workspace; empty = CLI default) |
 | `GITHUB_TOKEN`/`GH_TOKEN`| —             | PR creation (falls back to `gh auth token`) |
 
 ### Run with Docker (alternative to step 1)
@@ -119,13 +119,17 @@ by writing one adapter and registering it in `agents/registry.py`.
 **Workspace settings.** Agents run in your workspace and honor its own configuration, so the
 rules/permissions/tools/MCP servers you've already set up apply:
 
-- **Claude Code** loads the workspace's `.claude/settings.json`, `.claude/settings.local.json`,
-  `.mcp.json`, hooks, custom agents, and `CLAUDE.md`, plus your user settings in `~/.claude`.
-  (In SDK/`--print` mode the CLI doesn't read filesystem settings unless asked, so AgentBridge
-  passes `--setting-sources user,project,local`. Tune via `AGENTBRIDGE_CLAUDE_SETTING_SOURCES`
-  — e.g. `project,local` to ignore your global user settings, or empty for the CLI default.)
-  Permission rules in those settings are applied first; the widget's Allow/Deny card only
-  appears for actions the settings don't already decide.
+- **Claude Code** loads the workspace's `.claude/settings.json`, `.mcp.json`, hooks, custom
+  agents, and `CLAUDE.md`, plus your user settings in `~/.claude`. (In SDK/`--print` mode the
+  CLI doesn't read filesystem settings unless asked, so AgentBridge passes
+  `--setting-sources user,project`.) It **deliberately omits** the `local` source
+  (`.claude/settings.local.json`) — that's a per-user, machine-local permission cache the CLI
+  *writes* to, and excluding it keeps AgentBridge from reading or **creating any `.claude`
+  file in your workspace**; approvals flow through the widget's Allow/Deny card at runtime
+  instead. Tune via `AGENTBRIDGE_CLAUDE_SETTING_SOURCES` — e.g. add `local` back to honor the
+  workspace's local settings, `project` to ignore your global user settings, or empty for the
+  CLI default. Permission rules in the loaded settings are applied first; the Allow/Deny card
+  only appears for actions they don't already decide.
 - **Cursor** runs in the workspace too, so it picks up `.cursor/rules`, `.cursorrules`, and
   `AGENTS.md` automatically.
 
