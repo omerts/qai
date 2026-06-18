@@ -24,6 +24,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   // Crosshair "select element" icon (devtools-style inspector).
   var INSPECT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="4"/></svg>';
   var SHIELD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>';
+  var STOP_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>';
 
   // Tooltip text for the inspect (crosshair) button, by state.
   var INSPECT_TIP_OFF = "Inspect mode — click, then pick an element on the page to attach it to your next message as context.";
@@ -68,6 +69,8 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this._everConnected = false;
     this._reconnectTimer = null;
     this.pendingElement = null;  // element picked via the inspector, attached to next msg
+    this.running = false;        // true while the active chat's agent is working
+    this.queue = [];             // follow-ups typed while busy: {text, element}
     this._inspecting = false;
     this.autoApprove = lsGet(LS_AUTO) !== "0";  // default ON; "0" = user turned it off
     this._autoOpened = false;
@@ -170,14 +173,21 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     // Pending attached-element chip
     this.contextBar = h("div", { class: "ab-context-bar" });
 
+    // Queued follow-ups (typed while the agent is busy), shown above the composer.
+    this.queueBar = h("div", { class: "ab-queue" });
+
     // Composer
     this.input = h("textarea", { class: "ab-input", rows: "1", placeholder: "Describe a change…" });
     this.input.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); self._sendMessage(); }
     });
+    this.stopBtn = h("button", { class: "ab-stop", title: "Stop the agent" });
+    this.stopBtn.innerHTML = STOP_ICON;
+    this.stopBtn.hidden = true;  // only shown while the agent is working
+    this.stopBtn.addEventListener("click", function () { self._stopAgent(); });
     this.sendBtn = h("button", { class: "ab-send", text: "➤", title: "Send" });
     this.sendBtn.addEventListener("click", function () { self._sendMessage(); });
-    var composer = h("div", { class: "ab-composer" }, [this.input, this.sendBtn]);
+    var composer = h("div", { class: "ab-composer" }, [this.input, this.stopBtn, this.sendBtn]);
 
     // Connection banner (shown when not connected to the server)
     this.bannerText = h("span", { class: "ab-banner-text" });
@@ -188,7 +198,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     ]);
 
     var body = h("div", { class: "ab-body" }, [this.messages, this.drawer]);
-    var panel = h("div", { class: "ab-panel" }, [header, this.banner, controls, body, this.files, this.cardLayer, this.contextBar, composer]);
+    var panel = h("div", { class: "ab-panel" }, [header, this.banner, controls, body, this.files, this.cardLayer, this.contextBar, this.queueBar, composer]);
     this.root.appendChild(this.bubble);
     this.root.appendChild(panel);
     this.shadow.appendChild(this.root);
@@ -467,15 +477,59 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     var text = this.input.value.trim();
     if (!text) return;
     if (!this.activeChatId) { this._newChatHint(); return; }
-    this.bridge.addUser(text);
     this.input.value = "";
+    // Busy? Queue the follow-up instead of erroring; it's sent when the turn finishes.
+    if (this.running) {
+      this.queue.push({ text: text, element: this.pendingElement || null });
+      this._clearPendingElement();
+      this._renderQueue();
+      return;
+    }
+    this._dispatchUserMessage(text, this.pendingElement || null);
+    this._clearPendingElement();
+  };
+
+  // Actually send a user turn to the backend (used for immediate sends and dequeued ones).
+  AgentBridgeWidget.prototype._dispatchUserMessage = function (text, element) {
+    this.bridge.addUser(text);
     var context = { page: this._collectPageContext() };
-    if (this.pendingElement) context.element = this.pendingElement;
+    if (element) context.element = element;
     this._send({
       type: "user_message", chat_id: this.activeChatId, text: text,
       context: context, auto_approve: this.autoApprove,
     });
-    this._clearPendingElement();
+  };
+
+  AgentBridgeWidget.prototype._stopAgent = function () {
+    if (!this.activeChatId || !this.running) return;
+    this._send({ type: "stop", chat_id: this.activeChatId });
+    this._system("Stopping the agent…");
+    // Drop anything queued behind this turn — stopping means "halt", not "run the rest".
+    if (this.queue.length) { this.queue = []; this._renderQueue(); }
+  };
+
+  // Once the agent goes idle, send the next queued follow-up (one per turn).
+  AgentBridgeWidget.prototype._drainQueue = function () {
+    if (this.running || !this.queue.length || !this.activeChatId) return;
+    var item = this.queue.shift();
+    this._renderQueue();
+    this._dispatchUserMessage(item.text, item.element);
+  };
+
+  AgentBridgeWidget.prototype._renderQueue = function () {
+    this.queueBar.innerHTML = "";
+    if (!this.queue.length) { this.queueBar.classList.remove("show"); return; }
+    this.queueBar.classList.add("show");
+    this.queueBar.appendChild(h("div", { class: "ab-queue-head",
+      text: this.queue.length + " queued — sent when the agent is free" }));
+    var self = this;
+    this.queue.forEach(function (item, i) {
+      var x = h("button", { class: "ab-queue-x", text: "✕", title: "Remove from queue" });
+      x.addEventListener("click", function () { self.queue.splice(i, 1); self._renderQueue(); });
+      self.queueBar.appendChild(h("div", { class: "ab-queue-item" }, [
+        h("span", { class: "ab-queue-text", text: item.text }), x,
+      ]));
+    });
   };
 
   AgentBridgeWidget.prototype._toggleAutoApprove = function () {
@@ -820,9 +874,13 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
 
   AgentBridgeWidget.prototype._onStatus = function (state) {
     var working = state === "working";
+    this.running = working;
     this.statusDot.classList.toggle("working", working);
-    this.sendBtn.disabled = working;
+    this.stopBtn.hidden = !working;  // Stop is available only while the agent is working
+    // Send stays enabled while working so follow-ups can be queued.
+    this.input.placeholder = working ? "Queue a follow-up… (Enter)" : "Describe a change…";
     this.bridge.setRunning(working, this._agentLabel(this._activeAgentName()));
+    if (!working) this._drainQueue();
   };
 
   AgentBridgeWidget.prototype._agentLabel = function (name) {
@@ -861,6 +919,10 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.cardLayer.innerHTML = "";
     this.filesList.innerHTML = "";
     this.files.classList.remove("show", "open");
+    this.queue = [];
+    this._renderQueue();
+    this.running = false;
+    if (this.stopBtn) this.stopBtn.hidden = true;
     this._clearPendingElement();
   };
 

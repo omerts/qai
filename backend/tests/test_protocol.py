@@ -17,6 +17,11 @@ def test_parse_create_pr_optional_body():
     assert msg.chat_id == "c1" and msg.title == "Add feature" and msg.body is None
 
 
+def test_parse_stop_message():
+    msg = P.parse_client_message({"type": "stop", "chat_id": "c1"})
+    assert isinstance(msg, P.StopAgent) and msg.chat_id == "c1"
+
+
 def test_parse_chat_management_messages():
     assert isinstance(P.parse_client_message({"type": "list_chats"}), P.ListChats)
     assert isinstance(P.parse_client_message({"type": "open_chat", "chat_id": "c1"}), P.OpenChat)

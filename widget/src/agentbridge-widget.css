@@ -338,3 +338,29 @@
   border-radius: 10px; width: 40px; cursor: pointer; font-size: 16px;
 }
 .ab-send:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Stop button — appears in the composer while the agent is working */
+.ab-stop {
+  border: none; background: #ef4444; color: #fff;
+  border-radius: 10px; width: 40px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.ab-stop[hidden] { display: none; }
+.ab-stop svg { width: 18px; height: 18px; }
+.ab-stop:hover { filter: brightness(1.08); }
+
+/* Queued follow-ups (typed while the agent is busy) */
+.ab-queue { display: none; flex-direction: column; gap: 6px; padding: 8px 12px 0; }
+.ab-queue.show { display: flex; }
+.ab-queue-head { font-size: 11px; color: var(--ab-muted); }
+.ab-queue-item {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--ab-surface); border: 1px solid var(--ab-border);
+  border-radius: 8px; padding: 5px 6px 5px 9px; font-size: 12px;
+}
+.ab-queue-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ab-queue-x {
+  border: none; background: var(--ab-tint); color: var(--ab-muted);
+  border-radius: 50%; width: 18px; height: 18px; cursor: pointer; line-height: 1; font-size: 11px; flex: none;
+}
+.ab-queue-x:hover { color: var(--ab-fg); }

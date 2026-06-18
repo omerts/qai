@@ -104,6 +104,11 @@ carries a `chat_id`; the widget renders only messages for the chat currently on 
 4. The agent edits **in place** in the workspace the whole time (so your dev server's hot
    reload shows changes live); nothing branches automatically and your workspace branch is
    never switched.
+   - **Stop** — while the agent is working a stop button appears in the composer; it sends
+     `{type:"stop"}` and the backend interrupts the current turn (`adapter.interrupt()`).
+   - **Queue** — type more while it's busy and your follow-ups queue (shown above the
+     composer, removable); each is sent automatically when the agent next goes idle. Stop
+     clears the queue.
 5. **Create PR** (`create_pr`) → the server derives a branch name, creates a **git worktree**
    for it, relocates the in-place edits onto it, commits, pushes, and opens a GitHub pull
    request (the link appears in chat). It then **resets your workspace** back to a clean

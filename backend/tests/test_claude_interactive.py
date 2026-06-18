@@ -101,6 +101,61 @@ async def test_resolve_unknown_prompt_is_noop():
     await adapter.resolve_prompt("does-not-exist", "Allow")  # must not raise
 
 
+async def test_interrupt_ends_the_turn_cleanly():
+    """interrupt() stops a long-running turn without surfacing an error event."""
+    import asyncio
+
+    class BlockingClient:
+        def __init__(self, workspace, can_use_tool):
+            self.stopped = asyncio.Event()
+
+        async def connect(self):
+            pass
+
+        async def query(self, text, session_id="default"):
+            pass
+
+        async def receive_response(self):
+            yield _Msg([_Block(text="working on it…")])
+            await self.stopped.wait()  # hang until interrupted
+
+        async def interrupt(self):
+            self.stopped.set()
+
+        async def disconnect(self):
+            pass
+
+    ClaudeCodeAdapter.client_factory = staticmethod(
+        lambda workspace, can_use_tool, resume=None: BlockingClient(workspace, can_use_tool)
+    )
+    try:
+        adapter = ClaudeCodeAdapter(Path("."))
+        await adapter.start(SessionContext(session_id="s"))
+        events = []
+
+        async def consume():
+            async for ev in adapter.send("do something long"):
+                events.append(ev)
+
+        task = asyncio.create_task(consume())
+        for _ in range(50):  # wait until the turn has started streaming
+            if events:
+                break
+            await asyncio.sleep(0.01)
+
+        assert await adapter.interrupt() is True
+        await asyncio.wait_for(task, timeout=2)
+        assert events[-1].kind == "done"
+        assert not any(e.kind == "error" for e in events)  # interrupt isn't reported as an error
+    finally:
+        ClaudeCodeAdapter.client_factory = None
+
+
+async def test_interrupt_without_client_is_false():
+    adapter = ClaudeCodeAdapter(Path("."))
+    assert await adapter.interrupt() is False  # nothing running → nothing to stop
+
+
 def test_parser_tolerates_unknown_message_types():
     """The CLI emits new control messages (e.g. rate_limit_event) that the pinned SDK's
     parser doesn't recognize; we tolerate those instead of aborting the turn, but keep

@@ -143,6 +143,13 @@ class AgentAdapter(ABC):
         """
         return None
 
+    async def interrupt(self) -> bool:
+        """Best-effort cancel of the in-flight turn. Returns True if the agent was interrupted,
+        False if it doesn't support interruption (the turn then runs to completion). Default:
+        not supported.
+        """
+        return False
+
 
 class AgentUnavailableError(RuntimeError):
     """Raised when an adapter is selected but its backing tool is not installed."""

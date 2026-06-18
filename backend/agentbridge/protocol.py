@@ -100,6 +100,13 @@ class AgentResponse(BaseModel):
     answer: str
 
 
+class StopAgent(BaseModel):
+    """Cancel the in-flight agent turn for a chat."""
+
+    type: Literal["stop"]
+    chat_id: str
+
+
 class CreatePR(BaseModel):
     type: Literal["create_pr"]
     chat_id: str
@@ -123,6 +130,7 @@ ClientMessage = Annotated[
         DeleteChat,
         UserMessage,
         AgentResponse,
+        StopAgent,
         CreatePR,
         EndSession,
     ],

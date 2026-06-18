@@ -61,6 +61,7 @@ class Session:
         handler = {
             "user_message": self._on_user_message,
             "agent_response": self._on_agent_response,
+            "stop": self._on_stop,
             "create_pr": self._on_create_pr,
         }.get(msg.type)
         if handler is not None:
@@ -176,6 +177,16 @@ class Session:
     async def _on_agent_response(self, msg: P.AgentResponse) -> None:
         if self.adapter is not None:
             await self.adapter.resolve_prompt(msg.request_id, msg.answer)
+
+    async def _on_stop(self, msg: P.StopAgent) -> None:
+        """Cancel the in-flight turn. The running turn loop then ends and emits idle status."""
+        if not self._turn_active or self.adapter is None:
+            return
+        stopped = await self.adapter.interrupt()
+        if not stopped:
+            await self.send(
+                P.ErrorMessage(message="This agent can't be stopped mid-run.", chat_id=self.chat_id)
+            )
 
     async def _on_create_pr(self, msg: P.CreatePR) -> None:
         """Commit the in-place edits onto a fresh branch worktree, push, open a PR, then

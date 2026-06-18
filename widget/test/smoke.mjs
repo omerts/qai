@@ -153,6 +153,41 @@ async function main() {
   widget._onFileChanges([]);
   assert.ok(!filesEl.classList.contains("show"), "files area should hide with no changes");
 
+  // --- Stop + queue: while the agent is busy, the Stop button shows and follow-ups queue ---
+  const sent = [];
+  widget._send = (m) => sent.push(m);
+  widget.activeChatId = "c1";
+  const stopBtn = widget.shadow.querySelector(".ab-stop");
+  const queueEl = widget.shadow.querySelector(".ab-queue");
+  assert.ok(stopBtn && stopBtn.hidden, "stop button should be hidden when idle");
+
+  widget._onStatus("working");
+  assert.ok(!stopBtn.hidden, "stop button should show while working");
+
+  // Typing + send while working queues instead of dispatching.
+  widget.input.value = "also rename the header";
+  widget._sendMessage();
+  assert.equal(widget.queue.length, 1, "follow-up should be queued while working");
+  assert.ok(queueEl.classList.contains("show") && /1 queued/.test(queueEl.textContent), "queue strip not shown");
+  assert.ok(!sent.some((m) => m.type === "user_message"), "queued message must not be sent yet");
+
+  // Stop interrupts and clears the queue.
+  widget._stopAgent();
+  assert.ok(sent.some((m) => m.type === "stop" && m.chat_id === "c1"), "stop message not sent");
+  assert.equal(widget.queue.length, 0, "stop should clear the queue");
+
+  // Queue again, then going idle drains one queued follow-up as a real user_message.
+  widget._onStatus("working");
+  widget.input.value = "and fix the spacing";
+  widget._sendMessage();
+  assert.equal(widget.queue.length, 1, "second follow-up should queue");
+  widget._onStatus("idle");
+  assert.equal(widget.queue.length, 0, "idle should drain the queue");
+  const um = sent.filter((m) => m.type === "user_message");
+  assert.ok(um.length === 1 && /fix the spacing/.test(um[0].text), "dequeued message not dispatched");
+  assert.ok(stopBtn.hidden, "stop button should hide when idle");
+  widget.queue = []; widget._renderQueue(); widget.activeChatId = null;
+
   // Toggling auto-approve drops a system note into the chat (on, then off).
   widget.bridge.reset();
   widget._toggleAutoApprove();

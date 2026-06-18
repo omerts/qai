@@ -178,6 +178,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         self._resume: str | None = None   # session id to resume from (set at start)
         self._session_id: str | None = None  # latest session id seen (for persistence)
         self._auto_approve: bool = False   # when True, skip prompts for routine edits/commands
+        self._interrupted: bool = False    # set while a user-requested stop is in flight
 
     @classmethod
     def is_available(cls) -> bool:
@@ -221,6 +222,21 @@ class ClaudeCodeAdapter(AgentAdapter):
 
     def set_auto_approve(self, enabled: bool) -> None:
         self._auto_approve = bool(enabled)
+
+    async def interrupt(self) -> bool:
+        """Stop the in-flight turn. The current receive loop then ends and the turn finishes."""
+        if self._client is None:
+            return False
+        self._interrupted = True
+        # Also unblock any pending Allow/Deny prompt so the turn isn't stuck awaiting an answer.
+        for future in list(self._pending.values()):
+            if not future.done():
+                future.set_result("deny")
+        try:
+            await self._client.interrupt()
+            return True
+        except Exception:  # noqa: BLE001
+            return False
 
     # ------------------------------------------------------------------ #
     # Interactive permission callback
@@ -284,6 +300,7 @@ class ClaudeCodeAdapter(AgentAdapter):
 
         queue: asyncio.Queue[AgentEvent] = asyncio.Queue()
         self._queue = queue
+        self._interrupted = False
         done = object()
 
         async def run() -> None:
@@ -297,7 +314,10 @@ class ClaudeCodeAdapter(AgentAdapter):
                     async for event in self._translate(message):
                         await queue.put(event)
             except Exception as exc:  # noqa: BLE001
-                await queue.put(AgentEvent.error(f"Claude Code error: {exc}"))
+                # A user-requested interrupt may surface as an exception — that's expected,
+                # not an error to report.
+                if not self._interrupted:
+                    await queue.put(AgentEvent.error(f"Claude Code error: {exc}"))
             finally:
                 await queue.put(done)  # type: ignore[arg-type]
 

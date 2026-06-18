@@ -41,6 +41,8 @@ class CursorAdapter(AgentAdapter):
     def __init__(self, workspace: Path) -> None:
         super().__init__(workspace)
         self._chat_id: str | None = None
+        self._proc: asyncio.subprocess.Process | None = None
+        self._interrupted: bool = False
 
     @classmethod
     def is_available(cls) -> bool:
@@ -94,6 +96,7 @@ class CursorAdapter(AgentAdapter):
 
     async def send(self, text: str) -> AsyncIterator[AgentEvent]:  # type: ignore[override]
         cmd = self._build_command(text)
+        self._interrupted = False
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -106,21 +109,37 @@ class CursorAdapter(AgentAdapter):
             return
 
         assert proc.stdout is not None and proc.stderr is not None
+        self._proc = proc
         stderr_task = asyncio.create_task(self._drain(proc.stderr))
 
-        while True:
-            line = await proc.stdout.readline()
-            if not line:
-                break
-            for event in self._parse_line(line.decode(errors="replace")):
-                yield event
+        try:
+            while True:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                for event in self._parse_line(line.decode(errors="replace")):
+                    yield event
 
-        await proc.wait()
-        stderr = (await stderr_task).strip()
-        if proc.returncode not in (0, None):
-            yield AgentEvent.error(f"Cursor agent failed: {stderr or f'exit code {proc.returncode}'}")
-            return
-        yield AgentEvent.done()
+            await proc.wait()
+            stderr = (await stderr_task).strip()
+            # A user-requested stop kills the process — that's expected, not an error.
+            if not self._interrupted and proc.returncode not in (0, None):
+                yield AgentEvent.error(f"Cursor agent failed: {stderr or f'exit code {proc.returncode}'}")
+                return
+            yield AgentEvent.done()
+        finally:
+            self._proc = None
+
+    async def interrupt(self) -> bool:
+        proc = self._proc
+        if proc is None or proc.returncode is not None:
+            return False
+        self._interrupted = True
+        try:
+            proc.terminate()
+            return True
+        except ProcessLookupError:
+            return False
 
     @staticmethod
     async def _drain(reader: asyncio.StreamReader) -> str:
