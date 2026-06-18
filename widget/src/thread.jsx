@@ -39,6 +39,7 @@ export function createThreadBridge() {
   // snapshot comparison sees a new reference and React re-renders.
   var messages = [];
   var running = false;
+  var runLabel = "";  // display label of the agent currently working ("Claude Code", …)
   var emptyHint = "";
   var current = null; // id of the assistant/stderr message currently streaming
   var listeners = new Set();
@@ -51,6 +52,7 @@ export function createThreadBridge() {
     subscribe: function (l) { listeners.add(l); return function () { listeners.delete(l); }; },
     getMessages: function () { return messages; },
     getRunning: function () { return running; },
+    getRunLabel: function () { return runLabel; },
     getEmptyHint: function () { return emptyHint; },
     // ---- composer hook (unused while the vanilla composer is active, but kept so
     // assistant-ui's onNew has somewhere to go if its composer is ever enabled) ----
@@ -60,7 +62,11 @@ export function createThreadBridge() {
     // ---- vanilla-facing (write) ----
     reset: function () { messages = []; running = false; current = null; emit(); },
     setEmptyHint: function (t) { emptyHint = t || ""; emit(); },
-    setRunning: function (b) { running = !!b; emit(); },
+    setRunning: function (b, label) {
+      running = !!b;
+      if (label !== undefined) runLabel = label || "";
+      emit();
+    },
 
     addUser: function (text) {
       current = null;
@@ -169,6 +175,19 @@ function EmptyState(props) {
   return <div className="ab-empty">{hint || "Pick an agent above and press + to start a chat."}</div>;
 }
 
+// Animated "thinking" bubble shown while the agent is working and hasn't started its reply.
+function TypingIndicator(props) {
+  var who = props.label ? props.label : "Assistant";
+  return (
+    <div className="ab-msg agent ab-typing" role="status" aria-live="polite">
+      <span className="ab-typing-label">{who + " is thinking"}</span>
+      <span className="ab-typing-dots" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </span>
+    </div>
+  );
+}
+
 var MESSAGE_COMPONENTS = {
   UserMessage: UserMessage,
   AssistantMessage: AssistantMessage,
@@ -179,6 +198,13 @@ function ThreadView(props) {
   var bridge = props.bridge;
   var messages = useSyncExternalStore(bridge.subscribe, bridge.getMessages, bridge.getMessages);
   var running = useSyncExternalStore(bridge.subscribe, bridge.getRunning, bridge.getRunning);
+  var runLabel = useSyncExternalStore(bridge.subscribe, bridge.getRunLabel, bridge.getRunLabel);
+
+  // Show the thinking bubble while working and the agent hasn't begun streaming its reply
+  // (i.e. the last entry is the user's turn or a system note) — the streaming text is its
+  // own feedback once it starts.
+  var last = messages.length ? messages[messages.length - 1] : null;
+  var thinking = running && (!last || last.role !== "assistant");
 
   var runtime = useExternalStoreRuntime({
     messages: messages,
@@ -202,6 +228,7 @@ function ThreadView(props) {
             <EmptyState bridge={bridge} />
           </ThreadPrimitive.Empty>
           <ThreadPrimitive.Messages components={MESSAGE_COMPONENTS} />
+          {thinking ? <TypingIndicator label={runLabel} /> : null}
         </ThreadPrimitive.Viewport>
       </ThreadPrimitive.Root>
     </AssistantRuntimeProvider>

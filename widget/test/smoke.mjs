@@ -88,6 +88,21 @@ async function main() {
   assert.ok(reasoning && /considering the layout/.test(reasoning.textContent),
     "thinking/reasoning not rendered");
 
+  // While working and awaiting the reply, an animated "<Agent> is thinking" indicator shows;
+  // it disappears once the assistant starts streaming, and when work stops.
+  widget.bridge.reset();
+  widget.bridge.addUser("do a thing");
+  widget.bridge.setRunning(true, "Claude Code");
+  await tick();
+  const typing = widget.shadow.querySelector(".ab-typing");
+  assert.ok(typing && /Claude Code is thinking/.test(typing.textContent), "thinking indicator missing");
+  assert.ok(widget.shadow.querySelector(".ab-typing-dots span"), "thinking indicator dots missing");
+  widget.bridge.chunk("on it", "stdout");   // reply starts → indicator goes away
+  await tick();
+  assert.ok(!widget.shadow.querySelector(".ab-typing"), "thinking indicator should hide once streaming");
+  widget.bridge.setRunning(false);
+  widget.bridge.reset();
+
   // A system note routes to a system message.
   widget.bridge.addSystem("Target branch: feature/x");
   await tick();

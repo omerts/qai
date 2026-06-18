@@ -175,7 +175,34 @@
 .ab-empty { margin: auto; color: var(--ab-muted); font-size: 13px; text-align: center; padding: 0 24px; }
 
 /* Agent "thinking" / reasoning parts */
-.ab-reasoning { font-style: italic; color: var(--ab-muted); white-space: pre-wrap; }
+.ab-reasoning {
+  font-style: italic; color: var(--ab-muted); white-space: pre-wrap;
+  border-left: 2px solid var(--ab-border); padding: 1px 0 1px 10px;
+}
+.ab-reasoning::before {
+  content: "Thinking"; display: block;
+  font-style: normal; font-weight: 600; font-size: 10px;
+  letter-spacing: .04em; text-transform: uppercase;
+  color: var(--ab-muted); opacity: .75; margin-bottom: 3px;
+}
+
+/* "<Agent> is thinking" indicator shown while waiting for the reply to start */
+.ab-typing { display: inline-flex; align-items: center; gap: 8px; }
+.ab-typing-label { font-size: 12px; font-style: italic; color: var(--ab-muted); }
+.ab-typing-dots { display: inline-flex; gap: 4px; }
+.ab-typing-dots span {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--ab-muted);
+  animation: ab-typing 1.2s infinite ease-in-out;
+}
+.ab-typing-dots span:nth-child(2) { animation-delay: .15s; }
+.ab-typing-dots span:nth-child(3) { animation-delay: .3s; }
+@keyframes ab-typing {
+  0%, 70%, 100% { opacity: .3; transform: translateY(0); }
+  35% { opacity: 1; transform: translateY(-3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ab-typing-dots span { animation: none; opacity: .6; }
+}
 
 /* Rendered markdown inside agent/user bubbles (assistant-ui markdown -> semantic HTML) */
 .ab-msg.ab-md { white-space: normal; }

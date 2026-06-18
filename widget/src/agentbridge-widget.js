@@ -801,9 +801,17 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   };
 
   AgentBridgeWidget.prototype._onStatus = function (state) {
-    this.statusDot.classList.toggle("working", state === "working");
-    this.sendBtn.disabled = state === "working";
-    this.bridge.setRunning(state === "working");
+    var working = state === "working";
+    this.statusDot.classList.toggle("working", working);
+    this.sendBtn.disabled = working;
+    this.bridge.setRunning(working, this._agentLabel(this._activeAgentName()));
+  };
+
+  AgentBridgeWidget.prototype._agentLabel = function (name) {
+    for (var i = 0; i < this.agents.length; i++) {
+      if (this.agents[i].name === name) return this.agents[i].label || name;
+    }
+    return name || "Assistant";
   };
 
   AgentBridgeWidget.prototype._prLink = function (url, number) {
