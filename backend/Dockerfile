@@ -33,12 +33,18 @@ RUN npm install -g @anthropic-ai/claude-code@2 && npm cache clean --force
 
 WORKDIR /app
 
-# Install Python deps first for better layer caching: copy only dependency metadata + the
-# package, then install editable so the source layout (and the sibling widget/dist that the
-# server serves) resolves at runtime exactly as in development.
+# Install Python deps against ONLY the dependency metadata so this expensive layer is cached
+# and reused across source edits. A stub package lets the editable install resolve; the real
+# source is copied afterward. Editable installs are path-based, so the real code is picked up
+# at runtime — and because the pip layer no longer depends on the source, editing
+# backend/agentbridge no longer reinstalls every dependency.
 COPY backend/pyproject.toml backend/README.md ./backend/
+RUN mkdir -p ./backend/agentbridge \
+    && touch ./backend/agentbridge/__init__.py \
+    && pip install --no-cache-dir -e "./backend[claude]"
+
+# Real source — edits here only bust this layer, not the dependency install above.
 COPY backend/agentbridge ./backend/agentbridge
-RUN pip install --no-cache-dir -e "./backend[claude]"
 
 # The built widget bundle, served by the backend at /widget. Mirrors the repo layout so
 # main.py's relative lookup (../../widget/dist) finds it.
