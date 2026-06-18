@@ -27,8 +27,9 @@ class _Block:
 
 
 class _Msg:
-    def __init__(self, content):
+    def __init__(self, content, parent_tool_use_id=None):
         self.content = content
+        self.parent_tool_use_id = parent_tool_use_id
 
 
 class FakeClient:
@@ -245,3 +246,43 @@ def test_make_client_omits_sources_when_empty(monkeypatch):
 
     # Empty -> None: let the SDK use its own default (loads no filesystem settings).
     assert captured["options"].setting_sources is None
+
+
+async def _collect(adapter, msg):
+    return [e async for e in adapter._translate(msg)]
+
+
+async def test_translate_main_text_is_stdout_nested_is_thinking():
+    """Only the main agent's text is the answer; a subagent's chatter (tagged with
+    parent_tool_use_id) is internal and goes on the thinking stream."""
+    adapter = ClaudeCodeAdapter(Path("/tmp/x"))
+
+    main = await _collect(adapter, _Msg([_Block(text="Done — changed Internal to Admin.")]))
+    assert [(e.kind, e.stream) for e in main] == [("chunk", "stdout")]
+
+    nested = await _collect(
+        adapter,
+        _Msg([_Block(text="Find the file… Search breadth: quick.")], parent_tool_use_id="toolu_1"),
+    )
+    assert [(e.kind, e.stream) for e in nested] == [("chunk", "thinking")]
+
+
+async def test_translate_thinking_and_tool_calls_are_internal():
+    adapter = ClaudeCodeAdapter(Path("/tmp/x"))
+
+    # ThinkingBlock -> thinking
+    th = await _collect(adapter, _Msg([_Block(thinking="weighing options")]))
+    assert th[0].stream == "thinking" and th[0].text == "weighing options"
+
+    # An edit tool_use -> a file event AND a thinking "Editing <file>" activity line.
+    edit = await _collect(adapter, _Msg([_Block(name="Edit", input={"file_path": "/workspace/a.ts"})]))
+    assert any(e.kind == "file_touched" for e in edit)
+    acts = [e for e in edit if e.kind == "chunk"]
+    assert acts and acts[0].stream == "thinking" and "Editing" in acts[0].text and "a.ts" in acts[0].text
+
+    # A subagent dispatch -> a "Delegating" activity line on the thinking stream.
+    task = await _collect(adapter, _Msg([_Block(name="Task", input={"description": "explore the UI"})]))
+    assert any(e.kind == "chunk" and e.stream == "thinking" and "Delegating" in e.text for e in task)
+
+    # ToolResultBlock (no name/text/thinking) -> nothing rendered.
+    assert await _collect(adapter, _Msg([_Block()])) == []

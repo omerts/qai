@@ -84,8 +84,11 @@ export function createThreadBridge() {
       messages = messages.concat({ id: uid(), role: "system", variant: variant || "note", text: text });
       emit();
     },
-    // Streamed agent output. stdout/thinking render as the assistant; stderr as a
-    // system "error-ish" note. Consecutive chunks of the same stream append in place.
+    // Streamed agent output. stdout renders as the assistant; stderr as a system
+    // "error-ish" note; "thinking" is internal activity (the agent's reasoning + tool
+    // calls). Consecutive chunks of the same stream share one message; stdout/stderr
+    // *append*, while "thinking" *overwrites* so successive internal steps replace each
+    // other in a single live bubble instead of piling up.
     chunk: function (text, stream) {
       stream = stream || "stdout";
       var role = stream === "stderr" ? "system" : "assistant";
@@ -97,7 +100,8 @@ export function createThreadBridge() {
         messages = messages.concat(cur);
       }
       messages = messages.map(function (m) {
-        return m.id === current ? Object.assign({}, m, { text: m.text + text }) : m;
+        if (m.id !== current) return m;
+        return Object.assign({}, m, { text: stream === "thinking" ? text : m.text + text });
       });
       emit();
     },

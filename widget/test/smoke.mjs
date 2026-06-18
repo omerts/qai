@@ -88,6 +88,18 @@ async function main() {
   assert.ok(reasoning && /considering the layout/.test(reasoning.textContent),
     "thinking/reasoning not rendered");
 
+  // Internal "thinking" activity overwrites in place — only the latest step shows, and there
+  // is just one reasoning bubble (successive tool calls / thoughts don't pile up).
+  widget.bridge.reset();
+  widget.bridge.chunk("Reading a.ts", "thinking");
+  widget.bridge.chunk("Editing a.ts", "thinking");
+  await tick();
+  const reasons = widget.shadow.querySelectorAll(".ab-reasoning");
+  assert.equal(reasons.length, 1, "thinking should stay in a single overwriting bubble");
+  assert.ok(/Editing a\.ts/.test(reasons[0].textContent) && !/Reading a\.ts/.test(reasons[0].textContent),
+    "thinking should overwrite, showing only the latest step");
+  widget.bridge.reset();
+
   // While working and awaiting the reply, an animated "<Agent> is thinking" indicator shows;
   // it disappears once the assistant starts streaming, and when work stops.
   widget.bridge.reset();

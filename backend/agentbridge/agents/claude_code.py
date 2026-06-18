@@ -57,6 +57,41 @@ def _setting_sources() -> list[str] | None:
 _CONFIRM_TOOLS = {"edit", "write", "multiedit", "str_replace", "notebookedit", "bash"}
 _ALLOW_ANSWERS = {"allow", "yes", "y", "approve", "ok", ""}
 
+# File-mutating tools — a tool_use of one of these means a file was touched.
+_EDIT_TOOLS = {"edit", "write", "create", "multiedit", "str_replace", "notebookedit"}
+
+
+def _trunc(s: object, n: int = 80) -> str:
+    s = str(s).strip().replace("\n", " ")
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _tool_activity(name: str, tool_input: dict) -> str | None:
+    """A short, human one-liner describing a tool call, shown as internal 'thinking' activity
+    (it overwrites the previous one, so the bubble reads as the agent's current step)."""
+    n = (name or "").lower()
+    inp = tool_input or {}
+    if n in _EDIT_TOOLS:
+        p = inp.get("file_path") or inp.get("path")
+        return f"Editing {_trunc(p)}" if p else "Editing a file"
+    if n == "read":
+        p = inp.get("file_path") or inp.get("path")
+        return f"Reading {_trunc(p)}" if p else "Reading a file"
+    if n in {"bash", "shell"}:
+        return f"Running: {_trunc(inp.get('command', ''))}"
+    if n in {"grep", "glob", "search"}:
+        return f"Searching {_trunc(inp.get('pattern') or inp.get('query') or inp.get('path') or '')}"
+    if n in {"task", "agent", "dispatch_agent"}:
+        what = inp.get("description") or inp.get("subagent_type") or inp.get("prompt") or ""
+        return f"Delegating: {_trunc(what)}"
+    if n == "webfetch":
+        return f"Fetching {_trunc(inp.get('url', ''))}"
+    if n in {"todowrite", "todoread"}:
+        return "Updating the plan"
+    if not n:
+        return None
+    return f"Using {name}"
+
 # When auto-approval is on we still pause for confirmation on shell commands that look
 # destructive or hard to undo. Matched case-insensitively against the whole command line.
 _RISKY_BASH_PATTERNS = [
@@ -279,10 +314,19 @@ class ClaudeCodeAdapter(AgentAdapter):
         yield AgentEvent.done()
 
     async def _translate(self, message) -> AsyncIterator[AgentEvent]:
-        """Map one SDK message to zero or more AgentEvents (duck-typed across versions)."""
+        """Map one SDK message to zero or more AgentEvents (duck-typed across versions).
+
+        Only the *main* agent's text is the answer (stdout). Everything internal — its
+        thinking, its tool calls, and any nested subagent's chatter (tagged with
+        ``parent_tool_use_id``) — is emitted on the ``thinking`` stream so it renders inside
+        the thinking bubble and overwrites in place rather than cluttering the transcript.
+        """
         content = getattr(message, "content", None)
         if content is None:
             return
+        # Messages produced inside a Task/subagent carry the spawning tool's id; their text is
+        # orchestration detail, not the user-facing answer.
+        nested = bool(getattr(message, "parent_tool_use_id", None))
         blocks = content if isinstance(content, list) else [content]
         for block in blocks:
             # ThinkingBlock -> .thinking ; TextBlock -> .text
@@ -292,15 +336,21 @@ class ClaudeCodeAdapter(AgentAdapter):
                 continue
             text = getattr(block, "text", None)
             if text:
-                yield AgentEvent.chunk(text)
+                yield AgentEvent.chunk(text, stream="thinking" if nested else "stdout")
                 continue
-            # ToolUseBlock -> .name / .input ; report file edits as touched files.
-            name = (getattr(block, "name", "") or "").lower()
+            # ToolUseBlock -> .name / .input. Report file edits as touched files, and surface
+            # every tool call as internal activity in the thinking bubble.
+            name = getattr(block, "name", None)
+            if name is None:
+                continue  # e.g. ToolResultBlock — internal plumbing, nothing to show
             tool_input = getattr(block, "input", None) or {}
-            if name in {"edit", "write", "create", "multiedit", "str_replace", "notebookedit"}:
+            if name.lower() in _EDIT_TOOLS:
                 path = tool_input.get("file_path") or tool_input.get("path")
                 if path:
                     yield AgentEvent.file(str(path))
+            activity = _tool_activity(name, tool_input)
+            if activity:
+                yield AgentEvent.chunk(activity, stream="thinking")
 
     async def stop(self) -> None:
         # Unblock any outstanding prompt so the turn task can finish.
