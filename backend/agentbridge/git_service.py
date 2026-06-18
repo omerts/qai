@@ -33,13 +33,16 @@ def _ensure_git_safe_directory(path: Path) -> None:
     try:
         existing = subprocess.run(
             ["git", "config", "--global", "--get-all", "safe.directory"],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         ).stdout.splitlines()
         if target in existing or "*" in existing:
             return
         subprocess.run(
             ["git", "config", "--global", "--add", "safe.directory", target],
-            capture_output=True, check=False,
+            capture_output=True,
+            check=False,
         )
     except Exception:  # noqa: BLE001 — safe-dir setup is best-effort
         pass
@@ -61,13 +64,22 @@ class GitHubRepo:
         return f"{self.owner}/{self.name}"
 
 
+# Matches github.com as well as custom SSH host aliases that contain "github"
+# (e.g. ``git@github-codevisionary:owner/repo.git`` from an ~/.ssh/config Host alias or an
+# insteadOf rewrite). The host only needs to start with "github" — the canonical api/push
+# host is always github.com, so we only extract owner/name here.
 _GITHUB_REMOTE_RE = re.compile(
-    r"""github\.com[:/]+(?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$"""
+    r"""github[\w.-]*[:/]+(?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$"""
 )
 
 
 def parse_github_remote(url: str) -> GitHubRepo | None:
-    """Extract owner/name from an https or ssh GitHub remote URL (None if not GitHub)."""
+    """Extract owner/name from an https or ssh GitHub remote URL (None if not GitHub).
+
+    Handles plain ``github.com`` remotes and custom host aliases like
+    ``git@github-codevisionary:owner/repo.git`` so a tokenized HTTPS push can be built even
+    when the configured remote points at an ssh alias.
+    """
     match = _GITHUB_REMOTE_RE.search(url.strip())
     if not match:
         return None
@@ -100,7 +112,9 @@ class GitService:
 
     def create_branch(self, name: str | None = None, base: str | None = None) -> str:
         """Create and check out a new branch. Returns the branch name actually used."""
-        branch_name = self.sanitize_branch_name(name) if name else self.suggest_branch_name()
+        branch_name = (
+            self.sanitize_branch_name(name) if name else self.suggest_branch_name()
+        )
         # Avoid clobbering an existing branch by suffixing if needed.
         existing = {h.name for h in self.repo.heads}
         final = branch_name
@@ -135,7 +149,9 @@ class GitService:
         return root.parent / ".agentbridge-worktrees"
 
     def _stash_count(self) -> int:
-        return len([ln for ln in self.repo.git.stash("list").splitlines() if ln.strip()])
+        return len(
+            [ln for ln in self.repo.git.stash("list").splitlines() if ln.strip()]
+        )
 
     def worktree_dir_for(self, branch: str) -> Path:
         slug = branch.replace("/", "__")
@@ -146,7 +162,7 @@ class GitService:
         paths: set[str] = set()
         for line in out.splitlines():
             if line.startswith("worktree "):
-                paths.add(str(Path(line[len("worktree "):].strip())))
+                paths.add(str(Path(line[len("worktree ") :].strip())))
         return paths
 
     def ensure_worktree(self, branch: str, base: str | None = None) -> Path:
@@ -195,7 +211,9 @@ class GitService:
             return False
         return bool(out.strip())
 
-    def migrate_uncommitted_to(self, worktree_path: Path, paths: list[str] | None = None) -> bool:
+    def migrate_uncommitted_to(
+        self, worktree_path: Path, paths: list[str] | None = None
+    ) -> bool:
         """Move uncommitted changes into ``worktree_path``.
 
         Used at commit/PR time: the agent edits in place (so hot reload shows changes), and
@@ -244,7 +262,11 @@ class GitService:
         """Stage everything and commit. Returns the commit sha, or None if nothing to commit."""
         self.repo.git.add("--all")
         # Anything staged relative to HEAD? (handles the initial-commit case too)
-        staged = self.repo.index.diff("HEAD") if self.repo.head.is_valid() else self.repo.index.entries
+        staged = (
+            self.repo.index.diff("HEAD")
+            if self.repo.head.is_valid()
+            else self.repo.index.entries
+        )
         if not staged:
             return None
         try:
@@ -270,7 +292,12 @@ class GitService:
             return None
         return f"https://x-access-token:{token}@github.com/{gh.api_path}.git"
 
-    def push(self, branch: str | None = None, remote: str = "origin", token: str | None = None) -> None:
+    def push(
+        self,
+        branch: str | None = None,
+        remote: str = "origin",
+        token: str | None = None,
+    ) -> None:
         branch = branch or self.current_branch()
         url = self._authed_push_url(remote, token)
         try:
@@ -297,6 +324,15 @@ class GitService:
     # --------------------------------------------------------------------- #
 
     def github_repo(self, remote: str = "origin") -> GitHubRepo | None:
+        # Explicit override wins — lets the user point us at the GitHub repo directly when the
+        # configured remote is a custom ssh host alias / insteadOf rewrite we can't resolve.
+        # Same "owner/name" form GitHub Actions uses for GITHUB_REPOSITORY.
+        env_repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
+        if "/" in env_repo:
+            owner, _, name = env_repo.partition("/")
+            name = name.removesuffix(".git")
+            if owner and name:
+                return GitHubRepo(owner=owner, name=name)
         try:
             url = self.repo.remote(remote).url
         except ValueError:
@@ -346,7 +382,9 @@ class GitService:
             timeout=30,
         )
         if resp.status_code >= 300:
-            raise GitError(f"GitHub PR creation failed ({resp.status_code}): {resp.text}")
+            raise GitError(
+                f"GitHub PR creation failed ({resp.status_code}): {resp.text}"
+            )
         data = resp.json()
         return PullRequest(url=data["html_url"], number=data.get("number"))
 
@@ -363,5 +401,7 @@ class GitService:
         base = self.sanitize_branch_name(title) if title else "agentbridge/session"
         if not base.startswith("agentbridge/"):
             base = f"agentbridge/{base}"
-        suffix = self.repo.head.commit.hexsha[:4] if self.repo.head.is_valid() else "new"
+        suffix = (
+            self.repo.head.commit.hexsha[:4] if self.repo.head.is_valid() else "new"
+        )
         return f"{base}-{suffix}"

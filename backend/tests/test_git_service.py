@@ -4,13 +4,19 @@ from pathlib import Path
 import pytest
 from git import GitCommandError
 
-from agentbridge.git_service import GitError, GitService, _ensure_git_safe_directory, parse_github_remote
+from agentbridge.git_service import (
+    GitError,
+    GitService,
+    _ensure_git_safe_directory,
+    parse_github_remote,
+)
 
 
 def _safe_dirs() -> list[str]:
     return subprocess.run(
         ["git", "config", "--global", "--get-all", "safe.directory"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     ).stdout.splitlines()
 
 
@@ -64,36 +70,66 @@ def test_create_branch_dedupes(repo: Path):
 
 
 def test_authed_push_url_for_github_remote(repo: Path):
-    subprocess.run(["git", "remote", "add", "origin", "git@github.com:acme/widgets.git"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "git@github.com:acme/widgets.git"],
+        cwd=repo,
+        check=True,
+    )
     svc = GitService(repo)
-    assert svc._authed_push_url("origin", "tok123") == "https://x-access-token:tok123@github.com/acme/widgets.git"
-    assert svc._authed_push_url("origin", None) is None  # no token -> use the configured remote
+    assert (
+        svc._authed_push_url("origin", "tok123")
+        == "https://x-access-token:tok123@github.com/acme/widgets.git"
+    )
+    assert (
+        svc._authed_push_url("origin", None) is None
+    )  # no token -> use the configured remote
 
 
 def test_authed_push_url_skips_non_github(repo: Path):
-    subprocess.run(["git", "remote", "add", "origin", "https://gitlab.com/a/b.git"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://gitlab.com/a/b.git"],
+        cwd=repo,
+        check=True,
+    )
     assert GitService(repo)._authed_push_url("origin", "tok") is None
 
 
 def test_push_uses_token_https_url(repo: Path, monkeypatch):
-    subprocess.run(["git", "remote", "add", "origin", "git@github.com:acme/widgets.git"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "git@github.com:acme/widgets.git"],
+        cwd=repo,
+        check=True,
+    )
     svc = GitService(repo)
     seen = {}
     # Git uses __slots__ + __getattr__ dispatch, so patch the command at the class level.
-    monkeypatch.setattr(type(svc.repo.git), "push", lambda self, *a, **k: seen.setdefault("args", a), raising=False)
+    monkeypatch.setattr(
+        type(svc.repo.git),
+        "push",
+        lambda self, *a, **k: seen.setdefault("args", a),
+        raising=False,
+    )
     svc.push("agentbridge/feature", token="secret")
     # Pushed over HTTPS with the embedded token, not via ssh/--set-upstream.
     assert "https://x-access-token:secret@github.com/acme/widgets.git" in seen["args"]
-    assert "refs/heads/agentbridge/feature:refs/heads/agentbridge/feature" in seen["args"]
+    assert (
+        "refs/heads/agentbridge/feature:refs/heads/agentbridge/feature" in seen["args"]
+    )
 
 
 def test_push_scrubs_token_from_errors(repo: Path, monkeypatch):
-    subprocess.run(["git", "remote", "add", "origin", "git@github.com:acme/widgets.git"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "git@github.com:acme/widgets.git"],
+        cwd=repo,
+        check=True,
+    )
     svc = GitService(repo)
 
     def boom(self, *a, **k):
         raise GitCommandError(
-            "git push https://x-access-token:secret@github.com/acme/widgets.git", 128, b"denied"
+            "git push https://x-access-token:secret@github.com/acme/widgets.git",
+            128,
+            b"denied",
         )
 
     monkeypatch.setattr(type(svc.repo.git), "push", boom, raising=False)
@@ -105,7 +141,11 @@ def test_push_scrubs_token_from_errors(repo: Path, monkeypatch):
 def test_push_without_token_hints_to_set_github_token(repo: Path, monkeypatch):
     # No token + GitHub remote -> ssh fallback; if it fails, the error should tell the user
     # to set GITHUB_TOKEN rather than leaving a cryptic ssh message.
-    subprocess.run(["git", "remote", "add", "origin", "git@github.com:acme/widgets.git"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "git@github.com:acme/widgets.git"],
+        cwd=repo,
+        check=True,
+    )
     svc = GitService(repo)
 
     def boom(self, *a, **k):
@@ -171,8 +211,8 @@ def test_top_level_entries_marks_dirs(repo: Path):
     subprocess.run(["git", "add", "."], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-q", "-m", "add apps"], cwd=repo, check=True)
     entries = GitService(repo).top_level_entries()
-    assert "apps/" in entries          # directory marked with a trailing slash
-    assert "README.md" in entries      # file unmarked
+    assert "apps/" in entries  # directory marked with a trailing slash
+    assert "README.md" in entries  # file unmarked
 
 
 def test_status_reports_changes(repo: Path):
@@ -200,6 +240,9 @@ def test_commit_all_commits_changes(repo: Path):
         ("git@github.com:acme/widgets.git", "acme", "widgets"),
         ("https://github.com/acme/widgets.git", "acme", "widgets"),
         ("https://github.com/acme/widgets", "acme", "widgets"),
+        # Custom ssh host alias (~/.ssh/config Host / insteadOf rewrite) still maps to GitHub.
+        ("git@github-codevisionary:codevisionary/repo.git", "codevisionary", "repo"),
+        ("git@github-work:acme/widgets.git", "acme", "widgets"),
     ],
 )
 def test_parse_github_remote(url, owner, name):
@@ -209,3 +252,27 @@ def test_parse_github_remote(url, owner, name):
 
 def test_parse_github_remote_non_github():
     assert parse_github_remote("https://gitlab.com/a/b.git") is None
+
+
+def test_github_repo_from_alias_builds_token_push_url(repo: Path):
+    # A custom ssh host alias is recognized as GitHub, so a tokenized HTTPS push URL is built
+    # (pointing at the canonical github.com) instead of falling back to ssh.
+    subprocess.run(
+        ["git", "remote", "add", "origin", "git@github-codevisionary:codevisionary/repo.git"],
+        cwd=repo, check=True,
+    )
+    svc = GitService(repo)
+    assert svc._authed_push_url("origin", "tok") == (
+        "https://x-access-token:tok@github.com/codevisionary/repo.git"
+    )
+
+
+def test_github_repository_env_override_wins(repo: Path, monkeypatch):
+    # GITHUB_REPOSITORY overrides remote parsing entirely (escape hatch for unresolvable remotes).
+    subprocess.run(
+        ["git", "remote", "add", "origin", "git@host-we-cannot-resolve:x/y.git"],
+        cwd=repo, check=True,
+    )
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/widgets")
+    gh = GitService(repo).github_repo("origin")
+    assert gh and gh.owner == "acme" and gh.name == "widgets"
