@@ -52,6 +52,16 @@ def _setting_sources() -> list[str] | None:
         return None  # empty -> let the SDK use its default (loads no filesystem settings)
     return [s.strip() for s in raw.split(",") if s.strip()]
 
+
+def _sandbox_enabled() -> bool:
+    """Whether to keep Claude Code's OS-level bash sandbox on. Off by default: it relies on
+    kernel primitives (bubblewrap/seccomp) that usually aren't available inside the AgentBridge
+    container, where it blocks *all* Bash commands. The container itself is the isolation
+    boundary, and AgentBridge already gates risky commands via the Allow/Deny flow. Re-enable
+    with AGENTBRIDGE_CLAUDE_SANDBOX=1 on a host that supports it.
+    """
+    return os.environ.get("AGENTBRIDGE_CLAUDE_SANDBOX", "0").strip().lower() in ("1", "true", "yes", "on")
+
 # Tools that should ask the user before running. Read-only tools are auto-approved by the
 # SDK and never reach our callback; these are the ones worth a confirmation.
 _CONFIRM_TOOLS = {"edit", "write", "multiedit", "str_replace", "notebookedit", "bash"}
@@ -214,6 +224,9 @@ class ClaudeCodeAdapter(AgentAdapter):
             # Which settings to load from disk (see _setting_sources); defaults to user,project
             # so we never read or write the workspace's .claude/settings.local.json.
             setting_sources=_setting_sources(),
+            # Disable the OS bash sandbox by default — it can't initialize in the container and
+            # would block every Bash command (see _sandbox_enabled).
+            sandbox={"enabled": _sandbox_enabled()},
         )
         return ClaudeSDKClient(options=options)
 
