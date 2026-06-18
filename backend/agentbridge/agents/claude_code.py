@@ -316,10 +316,11 @@ class ClaudeCodeAdapter(AgentAdapter):
     async def _translate(self, message) -> AsyncIterator[AgentEvent]:
         """Map one SDK message to zero or more AgentEvents (duck-typed across versions).
 
-        Only the *main* agent's text is the answer (stdout). Everything internal — its
-        thinking, its tool calls, and any nested subagent's chatter (tagged with
-        ``parent_tool_use_id``) — is emitted on the ``thinking`` stream so it renders inside
-        the thinking bubble and overwrites in place rather than cluttering the transcript.
+        Only the *main* agent's final answer is stdout. Everything internal — its thinking,
+        its tool calls, the narration that accompanies a tool call ("Let me search…"), and any
+        nested subagent's chatter (tagged with ``parent_tool_use_id``) — is emitted on the
+        ``thinking`` stream so it renders inside the thinking bubble and overwrites in place
+        rather than cluttering the transcript.
         """
         content = getattr(message, "content", None)
         if content is None:
@@ -328,6 +329,11 @@ class ClaudeCodeAdapter(AgentAdapter):
         # orchestration detail, not the user-facing answer.
         nested = bool(getattr(message, "parent_tool_use_id", None))
         blocks = content if isinstance(content, list) else [content]
+        # Text that shares a message with a tool call is a preamble to that call, not the
+        # answer — the real answer arrives in a later, tool-free message. (ToolUseBlock is the
+        # only block type with a ``name``.)
+        has_tool_call = any(getattr(b, "name", None) is not None for b in blocks)
+        internal = nested or has_tool_call
         for block in blocks:
             # ThinkingBlock -> .thinking ; TextBlock -> .text
             thinking = getattr(block, "thinking", None)
@@ -336,7 +342,7 @@ class ClaudeCodeAdapter(AgentAdapter):
                 continue
             text = getattr(block, "text", None)
             if text:
-                yield AgentEvent.chunk(text, stream="thinking" if nested else "stdout")
+                yield AgentEvent.chunk(text, stream="thinking" if internal else "stdout")
                 continue
             # ToolUseBlock -> .name / .input. Report file edits as touched files, and surface
             # every tool call as internal activity in the thinking bubble.

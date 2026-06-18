@@ -267,6 +267,18 @@ async def test_translate_main_text_is_stdout_nested_is_thinking():
     assert [(e.kind, e.stream) for e in nested] == [("chunk", "thinking")]
 
 
+async def test_translate_preamble_text_with_tool_call_is_thinking():
+    """Main-agent narration that shares a message with a tool call ("Let me search… using the
+    Read tool") is a preamble, not the answer — it goes on the thinking stream."""
+    adapter = ClaudeCodeAdapter(Path("/tmp/x"))
+    msg = _Msg([
+        _Block(text="Let me search for the StatusTabs component using the Read tool."),
+        _Block(name="Read", input={"file_path": "/workspace/StatusTabs.tsx"}),
+    ])
+    streams = [e.stream for e in await _collect(adapter, msg) if e.kind == "chunk"]
+    assert streams and all(s == "thinking" for s in streams)  # no stdout from a tool message
+
+
 async def test_translate_thinking_and_tool_calls_are_internal():
     adapter = ClaudeCodeAdapter(Path("/tmp/x"))
 
