@@ -3,7 +3,14 @@ from pathlib import Path
 
 import pytest
 
-from agentbridge.git_service import GitService, parse_github_remote
+from agentbridge.git_service import GitService, _ensure_git_safe_directory, parse_github_remote
+
+
+def _safe_dirs() -> list[str]:
+    return subprocess.run(
+        ["git", "config", "--global", "--get-all", "safe.directory"],
+        capture_output=True, text=True,
+    ).stdout.splitlines()
 
 
 def _init_repo(path: Path) -> None:
@@ -24,6 +31,20 @@ def repo(tmp_path: Path) -> Path:
 def test_current_branch(repo: Path):
     svc = GitService(repo)
     assert svc.current_branch() == "main"
+
+
+def test_ensure_safe_directory_is_idempotent(tmp_path: Path):
+    target = tmp_path / "ws"
+    target.mkdir()
+    _ensure_git_safe_directory(target)
+    _ensure_git_safe_directory(target)  # second call must not duplicate
+    assert _safe_dirs().count(str(target)) == 1
+
+
+def test_gitservice_marks_workspace_safe(repo: Path):
+    # Constructing the service clears "dubious ownership" by trusting the workspace path.
+    GitService(repo)
+    assert str(repo) in _safe_dirs()
 
 
 def test_create_branch_switches(repo: Path):

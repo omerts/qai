@@ -16,6 +16,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends git curl ca-certificates nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
+# The workspace is a bind mount owned by the host user, so Git would reject it with
+# "detected dubious ownership". Trust any repo dir inside the container (single-tenant).
+RUN git config --system --add safe.directory '*'
+
 # Claude Code CLI (the binary the SDK shells out to). Authenticate at runtime with
 # ANTHROPIC_API_KEY. Pinned to the 2.x line to stay protocol-compatible with the
 # claude-agent-sdk pinned in backend/pyproject.toml — the SDK and CLI must move together

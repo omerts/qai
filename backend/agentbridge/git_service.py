@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,6 +18,31 @@ import httpx
 from git import GitCommandError, InvalidGitRepositoryError, Repo
 
 from .protocol import FileChange
+
+
+def _ensure_git_safe_directory(path: Path) -> None:
+    """Mark ``path`` as a safe Git directory.
+
+    Git 2.35.2+ refuses to operate on a repository owned by a different user than the running
+    process ("fatal: detected dubious ownership"), which routinely happens with Docker bind
+    mounts (host-owned files, container process is root). Adding the path to the global
+    ``safe.directory`` list clears that. Idempotent and best-effort — never let this break
+    the app.
+    """
+    target = str(path)
+    try:
+        existing = subprocess.run(
+            ["git", "config", "--global", "--get-all", "safe.directory"],
+            capture_output=True, text=True, check=False,
+        ).stdout.splitlines()
+        if target in existing or "*" in existing:
+            return
+        subprocess.run(
+            ["git", "config", "--global", "--add", "safe.directory", target],
+            capture_output=True, check=False,
+        )
+    except Exception:  # noqa: BLE001 — safe-dir setup is best-effort
+        pass
 
 
 @dataclass
@@ -54,10 +80,14 @@ class GitError(RuntimeError):
 
 class GitService:
     def __init__(self, workspace: Path) -> None:
+        # Clear "dubious ownership" before any git command runs (Docker bind mounts, etc.).
+        _ensure_git_safe_directory(Path(workspace))
         try:
             self.repo = Repo(workspace, search_parent_directories=True)
         except InvalidGitRepositoryError as exc:
             raise GitError(f"{workspace} is not inside a git repository") from exc
+        # The actual repo root may be a parent of `workspace` — mark it too.
+        _ensure_git_safe_directory(Path(self.repo.working_dir))
 
     # --------------------------------------------------------------------- #
     # Branch / status
