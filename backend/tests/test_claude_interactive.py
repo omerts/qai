@@ -32,6 +32,15 @@ class _Msg:
         self.parent_tool_use_id = parent_tool_use_id
 
 
+class _Result:
+    """Mimics the SDK's ResultMessage (no content block; carries the final answer text)."""
+
+    def __init__(self, result="", is_error=False):
+        self.content = None
+        self.result = result
+        self.is_error = is_error
+
+
 class FakeClient:
     """Mimics ClaudeSDKClient: streams text, asks permission, then edits if allowed."""
 
@@ -307,24 +316,28 @@ async def _collect(adapter, msg):
     return [e async for e in adapter._translate(msg)]
 
 
-async def test_translate_main_text_is_stdout_nested_is_thinking():
-    """Only the main agent's text is the answer; a subagent's chatter (tagged with
-    parent_tool_use_id) is internal and goes on the thinking stream."""
+async def test_translate_answer_comes_from_result_message():
+    """The final answer is the ResultMessage's result (the only stdout); all assistant prose
+    during the turn — including standalone narration — is internal thinking."""
     adapter = ClaudeCodeAdapter(Path("/tmp/x"))
 
-    main = await _collect(adapter, _Msg([_Block(text="Done — changed Internal to Admin.")]))
-    assert [(e.kind, e.stream) for e in main] == [("chunk", "stdout")]
+    # Assistant prose mid-turn (e.g. error-recovery narration) is thinking, not the answer.
+    narration = await _collect(adapter, _Msg([_Block(text="The shell isn't working. Let me use Read.")]))
+    assert [(e.kind, e.stream) for e in narration] == [("chunk", "thinking")]
 
-    nested = await _collect(
-        adapter,
-        _Msg([_Block(text="Find the file… Search breadth: quick.")], parent_tool_use_id="toolu_1"),
-    )
-    assert [(e.kind, e.stream) for e in nested] == [("chunk", "thinking")]
+    # The ResultMessage carries the answer on stdout.
+    ans = await _collect(adapter, _Result(result="Done — changed Internal to Admin."))
+    assert [(e.kind, e.stream) for e in ans] == [("chunk", "stdout")]
+    assert ans[0].text == "Done — changed Internal to Admin."
+
+    # An errored / empty result produces no answer.
+    assert await _collect(adapter, _Result(result="oops", is_error=True)) == []
+    assert await _collect(adapter, _Result(result=None)) == []
 
 
 async def test_translate_preamble_text_with_tool_call_is_thinking():
-    """Main-agent narration that shares a message with a tool call ("Let me search… using the
-    Read tool") is a preamble, not the answer — it goes on the thinking stream."""
+    """Narration that shares a message with a tool call ("Let me search… using the Read tool")
+    is internal — it goes on the thinking stream, never stdout."""
     adapter = ClaudeCodeAdapter(Path("/tmp/x"))
     msg = _Msg([
         _Block(text="Let me search for the StatusTabs component using the Read tool."),

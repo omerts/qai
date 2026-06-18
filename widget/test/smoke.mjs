@@ -100,6 +100,18 @@ async function main() {
     "thinking should overwrite, showing only the latest step");
   widget.bridge.reset();
 
+  // clearThinking drops the transient progress but keeps the real answer.
+  widget.bridge.addUser("rename it");
+  widget.bridge.chunk("Editing useOpportunityStats.ts", "thinking");
+  widget.bridge.addAgent("Done — renamed to Admin.");
+  await tick();
+  assert.ok(widget.shadow.querySelector(".ab-reasoning"), "thinking should be present mid-turn");
+  widget.bridge.clearThinking();
+  await tick();
+  assert.ok(!widget.shadow.querySelector(".ab-reasoning"), "thinking should be cleared");
+  assert.ok(/Done — renamed to Admin\./.test(widget.shadow.textContent), "answer should remain after clearThinking");
+  widget.bridge.reset();
+
   // While working and awaiting the reply, an animated "<Agent> is thinking" indicator shows;
   // it disappears once the assistant starts streaming, and when work stops.
   widget.bridge.reset();

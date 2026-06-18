@@ -880,7 +880,10 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     // Send stays enabled while working so follow-ups can be queued.
     this.input.placeholder = working ? "Queue a follow-up… (Enter)" : "Describe a change…";
     this.bridge.setRunning(working, this._agentLabel(this._activeAgentName()));
-    if (!working) this._drainQueue();
+    if (!working) {
+      this.bridge.clearThinking();  // turn done — drop transient progress, keep the answer
+      this._drainQueue();
+    }
   };
 
   AgentBridgeWidget.prototype._agentLabel = function (name) {

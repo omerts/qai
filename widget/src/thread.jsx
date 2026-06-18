@@ -61,6 +61,14 @@ export function createThreadBridge() {
 
     // ---- vanilla-facing (write) ----
     reset: function () { messages = []; running = false; current = null; emit(); },
+    // Drop the transient "thinking" progress (reasoning + tool activity) — called when a turn
+    // finishes so only the user/assistant exchange remains.
+    clearThinking: function () {
+      if (!messages.some(function (m) { return m.stream === "thinking"; })) return;
+      messages = messages.filter(function (m) { return m.stream !== "thinking"; });
+      if (current != null && !messages.some(function (m) { return m.id === current; })) current = null;
+      emit();
+    },
     setEmptyHint: function (t) { emptyHint = t || ""; emit(); },
     setRunning: function (b, label) {
       running = !!b;

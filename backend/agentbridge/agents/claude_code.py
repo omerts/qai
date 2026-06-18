@@ -349,33 +349,28 @@ class ClaudeCodeAdapter(AgentAdapter):
     async def _translate(self, message) -> AsyncIterator[AgentEvent]:
         """Map one SDK message to zero or more AgentEvents (duck-typed across versions).
 
-        Only the *main* agent's final answer is stdout. Everything internal — its thinking,
-        its tool calls, the narration that accompanies a tool call ("Let me search…"), and any
-        nested subagent's chatter (tagged with ``parent_tool_use_id``) — is emitted on the
-        ``thinking`` stream so it renders inside the thinking bubble and overwrites in place
-        rather than cluttering the transcript.
+        The turn's *answer* is the final ``ResultMessage.result`` — that's the only thing sent
+        as ``stdout``. Everything the agent does along the way (its reasoning, its running
+        narration like "Let me search…", and its tool calls) goes to the ``thinking`` stream so
+        it shows as transient progress in the thinking bubble, never mixed in with the answer.
         """
         content = getattr(message, "content", None)
         if content is None:
+            # ResultMessage (no content block) — its `result` is the final answer.
+            result = getattr(message, "result", None)
+            if result and not getattr(message, "is_error", False):
+                yield AgentEvent.chunk(result, stream="stdout")
             return
-        # Messages produced inside a Task/subagent carry the spawning tool's id; their text is
-        # orchestration detail, not the user-facing answer.
-        nested = bool(getattr(message, "parent_tool_use_id", None))
         blocks = content if isinstance(content, list) else [content]
-        # Text that shares a message with a tool call is a preamble to that call, not the
-        # answer — the real answer arrives in a later, tool-free message. (ToolUseBlock is the
-        # only block type with a ``name``.)
-        has_tool_call = any(getattr(b, "name", None) is not None for b in blocks)
-        internal = nested or has_tool_call
         for block in blocks:
-            # ThinkingBlock -> .thinking ; TextBlock -> .text
+            # ThinkingBlock -> .thinking ; TextBlock -> .text. Both are progress, not answer.
             thinking = getattr(block, "thinking", None)
             if thinking:
                 yield AgentEvent.chunk(thinking, stream="thinking")
                 continue
             text = getattr(block, "text", None)
             if text:
-                yield AgentEvent.chunk(text, stream="thinking" if internal else "stdout")
+                yield AgentEvent.chunk(text, stream="thinking")
                 continue
             # ToolUseBlock -> .name / .input. Report file edits as touched files, and surface
             # every tool call as internal activity in the thinking bubble.
