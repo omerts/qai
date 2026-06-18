@@ -101,14 +101,13 @@ carries a `chat_id`; the widget renders only messages for the chat currently on 
    runs uninterrupted; risky commands (`rm -rf`, `sudo`, `git push --force`, `curl … | sh`,
    …) still prompt. The toggle is remembered in `localStorage` and sent as `auto_approve` on
    each `user_message`.
-4. When the agent first edits a file on the base branch, the widget shows a **"Branch out?"**
-   card — accepting it sends `create_branch`. You can also click **Branch** any time. Nothing
-   branches automatically. This only *chooses* the branch name: the agent keeps editing in
-   the workspace (so your dev server's hot reload shows changes live), and the branch is
-   created server-side as a **git worktree** only at PR time.
-5. **Create PR** → relocates the in-place edits onto the chosen branch's worktree, commits,
-   pushes, and opens a GitHub pull request (your workspace branch stays untouched); the link
-   appears in chat.
+4. The agent edits **in place** in the workspace the whole time (so your dev server's hot
+   reload shows changes live); nothing branches automatically and your workspace branch is
+   never switched.
+5. **Create PR** (`create_pr`) → the server derives a branch name, creates a **git worktree**
+   for it, relocates the in-place edits onto it, commits, pushes, and opens a GitHub pull
+   request (the link appears in chat). It then **resets your workspace** back to a clean
+   state on its original branch.
 
 ## Page context & element picker
 

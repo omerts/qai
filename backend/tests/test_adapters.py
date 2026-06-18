@@ -76,7 +76,7 @@ class FakeAdapter(AgentAdapter):
         pass
 
 
-async def test_session_suggests_branch_on_first_edit(tmp_path: Path, monkeypatch):
+async def test_session_edits_in_place_without_branching(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("AGENTBRIDGE_STATE_DIR", str(tmp_path.parent / "state"))
     _init_repo(tmp_path)
     sent: list[P.ServerMessage] = []
@@ -91,32 +91,47 @@ async def test_session_suggests_branch_on_first_edit(tmp_path: Path, monkeypatch
 
     types = [m.type for m in sent]
     assert "agent_chunk" in types
-    assert "branch_suggested" in types  # advisory branch suggestion fired
     assert "file_changes" in types
-    # The suggestion must NOT have auto-created a branch.
-    assert session.git.current_branch() == "main"
+    # The agent edits in place on the current branch — no branch suggestion or auto-branching.
+    assert "branch_suggested" not in types
     assert "branch_created" not in types
+    assert session.git.current_branch() == "main"
+    assert (tmp_path / "agent_made_this.txt").exists()  # edit is live in the workspace
     # The turn was persisted to the transcript.
     kinds = [e["kind"] for e in session.record.transcript]
     assert "user" in kinds and "agent" in kinds
 
 
-async def test_session_create_branch_is_user_triggered(tmp_path: Path, monkeypatch):
+async def test_session_create_pr_resets_workspace(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("AGENTBRIDGE_WORKTREE_DIR", str(tmp_path.parent / "wt"))
     monkeypatch.setenv("AGENTBRIDGE_STATE_DIR", str(tmp_path.parent / "state"))
     _init_repo(tmp_path)
+
+    # Don't hit the network: stub push + the GitHub PR call.
+    from agentbridge import git_service
+
+    monkeypatch.setattr(git_service.GitService, "push", lambda self, *a, **k: None)
+    monkeypatch.setattr(
+        git_service.GitService,
+        "create_pull_request",
+        lambda self, **k: git_service.PullRequest(url="https://example/pull/1", number=1),
+    )
+
     sent: list[P.ServerMessage] = []
 
     async def send(m: P.ServerMessage) -> None:
         sent.append(m)
 
     session = _make_session(tmp_path, send)
-    await session.handle(P.CreateBranch(type="create_branch", chat_id=session.chat_id, name="agentbridge/manual"))
+    session.adapter = FakeAdapter(tmp_path)
+    await session.handle(P.UserMessage(type="user_message", chat_id=session.chat_id, text="make a file"))
+    assert (tmp_path / "agent_made_this.txt").exists()
 
-    # Choosing a branch does NOT switch the workspace branch or create anything yet — the
-    # branch is recorded and materialized as a worktree only at PR time.
+    await session.handle(P.CreatePR(type="create_pr", chat_id=session.chat_id, title="Add a file"))
+
+    types = [m.type for m in sent]
+    assert "branch_created" in types and "pr_created" in types
+    # The edits were relocated onto the branch worktree and the workspace was reset clean.
+    assert not (tmp_path / "agent_made_this.txt").exists()
     assert session.git.current_branch() == "main"
-    assert session.record.target_branch == "agentbridge/manual"
-    created = [m for m in sent if m.type == "branch_created"]
-    assert created and created[0].branch == "agentbridge/manual"
-    assert created[0].worktree_path is None
+    assert not session.git.has_uncommitted_changes()

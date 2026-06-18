@@ -100,13 +100,6 @@ class AgentResponse(BaseModel):
     answer: str
 
 
-class CreateBranch(BaseModel):
-    type: Literal["create_branch"]
-    chat_id: str
-    name: str | None = None
-    base_branch: str | None = None
-
-
 class CreatePR(BaseModel):
     type: Literal["create_pr"]
     chat_id: str
@@ -130,7 +123,6 @@ ClientMessage = Annotated[
         DeleteChat,
         UserMessage,
         AgentResponse,
-        CreateBranch,
         CreatePR,
         EndSession,
     ],
@@ -203,13 +195,6 @@ class AgentPrompt(ServerMessage):
     # When present, the widget renders one button per option (e.g. ["Allow", "Deny"])
     # and sends the chosen label back as the answer. Absent => free-text reply.
     options: list[str] | None = None
-
-
-class BranchSuggested(ServerMessage):
-    type: Literal["branch_suggested"] = "branch_suggested"
-    chat_id: str
-    suggested_name: str
-    reason: str
 
 
 class BranchCreated(ServerMessage):

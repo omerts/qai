@@ -119,12 +119,10 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       closeBtn,
     ]);
 
-    // Controls: agent picker + branch + PR + inspect
+    // Controls: agent picker + PR + inspect
     this.agentSelect = h("select", { class: "ab-select", title: "Default agent for new chats" });
     this.agentSelect.addEventListener("change", function () { self._selectAgent(); });
-    this.branchBtn = h("button", { class: "ab-btn", text: "Branch", title: "Choose the branch this work commits to (created at PR time; your workspace branch is untouched)" });
-    this.branchBtn.addEventListener("click", function () { self._requestBranch(); });
-    this.prBtn = h("button", { class: "ab-btn", text: "Create PR", title: "Commit, push and open a pull request" });
+    this.prBtn = h("button", { class: "ab-btn", text: "Create PR", title: "Commit the agent's edits to a branch, open a pull request, and reset your workspace" });
     this.prBtn.addEventListener("click", function () { self._createPR(); });
     this.inspectBtn = h("button", { class: "ab-iconbtn ab-inspect", title: "Select an element on the page to attach as context" });
     this.inspectBtn.innerHTML = INSPECT_ICON;
@@ -134,7 +132,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.autoBtn.addEventListener("click", function () { self._toggleAutoApprove(); });
     this.branchLabel = h("span", { class: "ab-branch-label" });
     var controls = h("div", { class: "ab-controls" }, [
-      this.agentSelect, this.branchBtn, this.prBtn, this.inspectBtn, this.autoBtn, this.branchLabel,
+      this.agentSelect, this.prBtn, this.inspectBtn, this.autoBtn, this.branchLabel,
     ]);
     this._refreshAutoApproveBtn();
 
@@ -294,17 +292,11 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       case "chat_deleted": return this._onChatDeleted(msg);
       case "agent_chunk": return this._isActive(msg) && this._onChunk(msg);
       case "agent_prompt": return this._isActive(msg) && this._onPrompt(msg);
-      case "branch_suggested": return this._isActive(msg) && this._onBranchSuggested(msg);
       case "branch_created":
         if (!this._isActive(msg)) return;
         this.branch = msg.branch; this.targetBranch = msg.branch; this._updateBranchLabel();
-        if (msg.worktree_path) {
-          this._system("Committed your changes to " + msg.branch
-            + "\nWorkspace branch untouched; worktree: " + msg.worktree_path);
-        } else {
-          this._system("Target branch set: " + msg.branch
-            + "\nYour edits stay live in the app and commit here when you open a PR.");
-        }
+        this._system("Committed your changes to " + msg.branch
+          + "\nWorkspace reset to its original branch; worktree: " + msg.worktree_path);
         return;
       case "file_changes": return this._isActive(msg) && this._onFileChanges(msg.files);
       case "pr_created": return this._isActive(msg) && this._prLink(msg.url, msg.number);
@@ -490,11 +482,6 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
 
   AgentBridgeWidget.prototype._newChatHint = function () {
     this._system("No chat open — pick an agent and press + to start one.");
-  };
-
-  AgentBridgeWidget.prototype._requestBranch = function (suggestedName) {
-    if (!this.activeChatId) return this._newChatHint();
-    this._send({ type: "create_branch", chat_id: this.activeChatId, name: suggestedName || null });
   };
 
   AgentBridgeWidget.prototype._createPR = function () {
@@ -778,21 +765,6 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     input.focus();
   };
 
-  AgentBridgeWidget.prototype._onBranchSuggested = function (msg) {
-    var self = this;
-    var create = h("button", { class: "ab-btn primary", text: "Choose branch" });
-    create.addEventListener("click", function () {
-      self._requestBranch(msg.suggested_name);
-      card.remove();
-    });
-    var ignore = h("button", { class: "ab-btn", text: "Not now" });
-    ignore.addEventListener("click", function () { card.remove(); });
-    var body = h("span");
-    body.innerHTML = escapeHtml(msg.reason) + " &nbsp;<code>" + escapeHtml(msg.suggested_name) + "</code>";
-    var card = this._card("Branch out?", null, [create, ignore]);
-    card.querySelector(".ab-card-body").appendChild(body);
-  };
-
   AgentBridgeWidget.prototype._onFileChanges = function (files) {
     this.filesList.innerHTML = "";
     if (!files || !files.length) { this.files.classList.remove("show"); return; }
@@ -893,7 +865,6 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   };
 
   AgentBridgeWidget.prototype._setChatActive = function (on) {
-    this.branchBtn.disabled = !on;
     this.prBtn.disabled = !on;
     this.inspectBtn.disabled = !on;
     this.sendBtn.disabled = !on;

@@ -50,8 +50,6 @@ class Session:
         self.adapter = None
         if record.base_branch is None:
             record.base_branch = self.git.current_branch()
-        self._suggested_branch = False
-        self._branch_chosen = record.target_branch is not None
         self._turn_active = False
         self._turn_text: list[str] = []  # accumulates stdout for the current turn
 
@@ -63,7 +61,6 @@ class Session:
         handler = {
             "user_message": self._on_user_message,
             "agent_response": self._on_agent_response,
-            "create_branch": self._on_create_branch,
             "create_pr": self._on_create_pr,
         }.get(msg.type)
         if handler is not None:
@@ -149,17 +146,12 @@ class Session:
         self._turn_active = True
         self._turn_text = []
         await self.send(P.Status(chat_id=self.chat_id, state="working"))
-        touched_a_file = False
 
         # Serialize across chats: only one agent turn touches the workspace at a time.
         async with self.turn_lock:
             try:
                 async for event in self.adapter.send(text):  # type: ignore[union-attr]
-                    if event.kind == "file_touched":
-                        touched_a_file = True
                     await self._emit(event)
-                    if event.kind == "file_touched":
-                        await self._maybe_suggest_branch()
             except Exception as exc:  # noqa: BLE001
                 await self.send(P.ErrorMessage(message=f"Agent run failed: {exc}", chat_id=self.chat_id))
             finally:
@@ -179,36 +171,21 @@ class Session:
         await self.send(
             P.FileChanges(chat_id=self.chat_id, files=[P.FileChange(**f) for f in self.record.files])
         )
-
-        if not touched_a_file and self.git.has_uncommitted_changes():
-            await self._maybe_suggest_branch()
         await self.send(P.Status(chat_id=self.chat_id, state="idle"))
 
     async def _on_agent_response(self, msg: P.AgentResponse) -> None:
         if self.adapter is not None:
             await self.adapter.resolve_prompt(msg.request_id, msg.answer)
 
-    async def _on_create_branch(self, msg: P.CreateBranch) -> None:
-        """User-triggered. Choose the branch this work commits to (created at PR time)."""
-        self.record.target_branch = (
-            self.git.sanitize_branch_name(msg.name) if msg.name else self.git.suggest_branch_name(self.record.title)
-        )
-        self._branch_base = msg.base_branch
-        self._branch_chosen = True
-        entry = {"kind": "branch", "branch": self.record.target_branch, "worktree_path": None}
-        self.record.transcript.append(entry)
-        self.store.save(self.record)
-        await self.notify_chats()
-        await self.send(P.BranchCreated(chat_id=self.chat_id, branch=self.record.target_branch))
-
     async def _on_create_pr(self, msg: P.CreatePR) -> None:
+        """Commit the in-place edits onto a fresh branch worktree, push, open a PR, then
+        reset the workspace (e.g. ``main``) back to a clean state."""
         if not self.git.has_uncommitted_changes() and self.record.target_branch is None:
             await self.send(P.ErrorMessage(message="No changes to commit yet.", chat_id=self.chat_id))
             return
         branch = self.record.target_branch or self.git.suggest_branch_name(self.record.title)
-        base = getattr(self, "_branch_base", None)
         try:
-            path = self.git.ensure_worktree(branch, base=base)
+            path = self.git.ensure_worktree(branch)
             self.git.migrate_uncommitted_to(path)
             wt_git = GitService(path)
             wt_git.commit_all(msg.title)
@@ -216,12 +193,13 @@ class Session:
             pr = wt_git.create_pull_request(
                 title=msg.title, head=branch, body=msg.body or "", token=self.github_token
             )
+            # The edits now live on the branch — return the workspace to a pristine HEAD.
+            self.git.reset_workspace()
         except GitError as exc:
             await self.send(P.ErrorMessage(message=str(exc), chat_id=self.chat_id))
             return
 
         self.record.target_branch = branch
-        self._branch_chosen = True
         self.record.transcript.append({"kind": "branch", "branch": branch, "worktree_path": str(path)})
         self.record.transcript.append({"kind": "pr", "url": pr.url, "number": pr.number})
         await self._refresh_files()
@@ -259,24 +237,6 @@ class Session:
         except GitError:
             return
         await self.send(P.FileChanges(chat_id=self.chat_id, files=changes))
-
-    async def _maybe_suggest_branch(self) -> None:
-        if self._suggested_branch or self._branch_chosen:
-            return
-        if self.git.current_branch() != self.record.base_branch:
-            return
-        self._suggested_branch = True
-        await self.send(
-            P.BranchSuggested(
-                chat_id=self.chat_id,
-                suggested_name=self.git.suggest_branch_name(self.record.title),
-                reason=(
-                    f"The agent is editing on '{self.record.base_branch}'. Choose a branch for "
-                    "this work? Your edits stay live in the workspace; they're committed to the "
-                    "branch when you open a PR."
-                ),
-            )
-        )
 
     @staticmethod
     def _format_context(ctx: dict | None) -> str:

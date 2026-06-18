@@ -2,7 +2,7 @@
 
 Registers an in-memory FakeAdapter, points the server at a temp git repo, and drives the
 full flow: list_agents -> start_session -> user_message (agent edits a file) ->
-branch_suggested -> create_branch -> create_pr (GitHub mocked).
+create_pr (GitHub mocked) -> workspace reset.
 """
 
 import asyncio
@@ -141,27 +141,25 @@ def test_full_session_flow(client):
         chat_id = started["chat_id"]
 
         ws.send_json({"type": "user_message", "chat_id": chat_id, "text": "add a feature"})
-        suggested = _recv_until(ws, "branch_suggested")
-        assert "agentbridge/" in suggested["suggested_name"]
-        assert suggested["chat_id"] == chat_id
-        # File the agent created is really on disk.
+        _recv_until(ws, "file_changes")   # turn complete
+        # File the agent created is really on disk — it edits in place while you work.
         assert (repo / "feature.txt").exists()
 
-        # User chooses a branch. Nothing is checked out yet — the agent's edits stay live
-        # in the workspace (so the dev server's hot reload keeps showing them).
-        ws.send_json({"type": "create_branch", "chat_id": chat_id, "name": suggested["suggested_name"]})
+        # Open a PR: a branch worktree is created and the edits are committed onto it. The
+        # branch name is derived automatically (no separate "branch" step), then the
+        # workspace is reset back to a clean HEAD.
+        ws.send_json({"type": "create_pr", "chat_id": chat_id, "title": "Add feature"})
         created = _recv_until(ws, "branch_created")
         assert created["branch"].startswith("agentbridge/")
-        assert created["worktree_path"] is None
-        assert (repo / "feature.txt").exists()        # still live in the workspace
-
-        # Open a PR: now the branch worktree is created and the edits are committed onto it,
-        # leaving the workspace branch untouched and its tree clean.
-        ws.send_json({"type": "create_pr", "chat_id": chat_id, "title": "Add feature"})
+        assert created["worktree_path"]               # committed onto a real worktree
         pr = _recv_until(ws, "pr_created")
         assert pr["url"].endswith("/pull/7")
         assert pr["number"] == 7
         assert not (repo / "feature.txt").exists()    # relocated onto the branch worktree
+        # Workspace is pristine again: no uncommitted changes left behind.
+        assert subprocess.run(
+            ["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True
+        ).stdout.strip() == ""
 
 
 def test_interactive_prompt_round_trip(client):

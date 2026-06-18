@@ -162,6 +162,16 @@ class GitService:
             raise GitError(f"Staging changes into the worktree failed: {exc}") from exc
         return True
 
+    def reset_workspace(self) -> None:
+        """Discard everything in the working tree, returning the workspace to a clean HEAD.
+
+        Called after a PR is opened: the edits have been relocated onto the branch worktree,
+        so the workspace (e.g. ``main``) is reset to a pristine state. Tracked changes are
+        reverted and untracked files removed; ignored files (node_modules, .venv, …) are kept.
+        """
+        self.repo.git.reset("--hard")
+        self.repo.git.clean("-fd")
+
     def status(self) -> list[FileChange]:
         """Working-tree changes as porcelain entries (staged + unstaged + untracked)."""
         raw = self.repo.git.status("--porcelain")

@@ -11,10 +11,10 @@ def test_parse_start_session():
     assert msg.title == "fix"
 
 
-def test_parse_create_branch_optional_fields():
-    msg = P.parse_client_message({"type": "create_branch", "chat_id": "c1"})
-    assert isinstance(msg, P.CreateBranch)
-    assert msg.chat_id == "c1" and msg.name is None and msg.base_branch is None
+def test_parse_create_pr_optional_body():
+    msg = P.parse_client_message({"type": "create_pr", "chat_id": "c1", "title": "Add feature"})
+    assert isinstance(msg, P.CreatePR)
+    assert msg.chat_id == "c1" and msg.title == "Add feature" and msg.body is None
 
 
 def test_parse_chat_management_messages():
@@ -52,6 +52,6 @@ def test_parse_unknown_type_raises():
 
 def test_server_messages_carry_type_in_dump():
     assert P.SessionStarted(chat_id="c1", agent="cursor", branch="main").model_dump()["type"] == "session_started"
-    assert P.BranchSuggested(chat_id="c1", suggested_name="x", reason="y").model_dump()["type"] == "branch_suggested"
+    assert P.BranchCreated(chat_id="c1", branch="x").model_dump()["type"] == "branch_created"
     assert P.AgentChunk(chat_id="c1", text="hi").model_dump()["stream"] == "stdout"
     assert P.Chats(chats=[]).model_dump()["type"] == "chats"

@@ -10,8 +10,9 @@ AgentBridge has three parts:
 2. **Widget** (`widget/`) — a Shadow-DOM chat bubble you drop into any React/Angular/Vue
    (or plain HTML) frontend with a single `<script>` tag. The shell is plain DOM; the
    message thread is rendered with [assistant-ui](https://www.assistant-ui.com/) (React).
-3. **Session workflow** — chat with the agent, **branch when you decide to** (the agent
-   only *suggests* branching), then open a pull request when done.
+3. **Session workflow** — chat with the agent while it edits your workspace in place, then
+   click **Create PR** when done: AgentBridge commits the edits onto a fresh branch, opens a
+   pull request, and resets your workspace back to a clean state.
 
 ```
 ┌─────────────────┐   WebSocket    ┌──────────────────────────┐
@@ -135,21 +136,19 @@ rules/permissions/tools/MCP servers you've already set up apply:
 
 1. Open the bubble → pick an agent → a session starts **on your current branch**.
 2. Describe a change in chat → the agent streams its work; edited files show in the footer.
-3. The agent **offers** to choose a branch when it starts editing on your base branch — you
-   accept or ignore it. You can also click **Branch** at any time. Branching is always your call.
-4. Click **Create PR** → AgentBridge commits the edits onto the branch, pushes, and opens a
-   GitHub PR; the link appears in chat.
+3. Click **Create PR** → AgentBridge commits the edits onto a fresh branch, pushes, opens a
+   GitHub PR (the link appears in chat), and resets your workspace back to a clean state.
 
-### Edit in place, branch at commit time (hot reload works)
+### Edit in place, branch at PR time (hot reload works)
 
 The agent edits files **directly in your workspace directory** the whole time it's working,
 so a dev server running there with hot reload shows its changes **live** — no extra setup.
 
-Your workspace's checked-out branch is never switched or committed to. Instead, clicking
-**Branch** just *chooses* the branch name for this work (nothing is created yet). When you
-**Create PR**, AgentBridge creates a [git worktree](https://git-scm.com/docs/git-worktree)
-for that branch, relocates your in-place edits onto it, and commits/pushes from there — then
-opens the PR. After that the workspace returns to a clean state on its original branch.
+Your workspace's checked-out branch is never switched or committed to. When you click
+**Create PR**, AgentBridge derives a branch name, creates a
+[git worktree](https://git-scm.com/docs/git-worktree) for it, relocates your in-place edits
+onto it, and commits/pushes from there — then opens the PR. After that the workspace is
+**reset** back to a clean state on its original branch.
 
 > Worktrees are created lazily at PR time under `AGENTBRIDGE_WORKTREE_DIR` (default: a
 > `.agentbridge-worktrees` folder beside your repo; a persistent `/worktrees` volume in
