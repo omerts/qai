@@ -264,6 +264,13 @@ class GitService:
             msg = str(exc)
             if token:
                 msg = msg.replace(token, "***")  # never leak the token in an error
+            # The most common failure: a GitHub remote but no token, so we fell back to ssh
+            # (often unavailable/unconfigured in containers, or rewritten by an insteadOf rule).
+            if not url and self.github_repo(remote) is not None:
+                msg += (
+                    " — set GITHUB_TOKEN (or GH_TOKEN) so AgentBridge pushes to GitHub over "
+                    "HTTPS instead of ssh"
+                )
             raise GitError(f"Push to {remote}/{branch} failed: {msg}") from exc
 
     # --------------------------------------------------------------------- #

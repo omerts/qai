@@ -102,6 +102,21 @@ def test_push_scrubs_token_from_errors(repo: Path, monkeypatch):
     assert "secret" not in str(ei.value) and "***" in str(ei.value)
 
 
+def test_push_without_token_hints_to_set_github_token(repo: Path, monkeypatch):
+    # No token + GitHub remote -> ssh fallback; if it fails, the error should tell the user
+    # to set GITHUB_TOKEN rather than leaving a cryptic ssh message.
+    subprocess.run(["git", "remote", "add", "origin", "git@github.com:acme/widgets.git"], cwd=repo, check=True)
+    svc = GitService(repo)
+
+    def boom(self, *a, **k):
+        raise GitCommandError("git push", 128, b"ssh: could not resolve hostname")
+
+    monkeypatch.setattr(type(svc.repo.git), "push", boom, raising=False)
+    with pytest.raises(GitError) as ei:
+        svc.push("agentbridge/feature")  # no token
+    assert "GITHUB_TOKEN" in str(ei.value)
+
+
 def test_ensure_worktree_leaves_workspace_branch(repo: Path, monkeypatch):
     monkeypatch.setenv("AGENTBRIDGE_WORKTREE_DIR", str(repo.parent / "wt"))
     svc = GitService(repo)
