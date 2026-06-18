@@ -171,19 +171,33 @@ class GitService:
             raise GitError(f"Could not create worktree for '{branch}': {exc}") from exc
         return path
 
-    def migrate_uncommitted_to(self, worktree_path: Path) -> bool:
-        """Move the workspace's uncommitted changes into ``worktree_path``.
+    def is_path_dirty(self, path: str) -> bool:
+        """Whether ``path`` (workspace-relative) has uncommitted changes (modified, staged,
+        deleted, or untracked)."""
+        try:
+            out = self.repo.git.status("--porcelain", "--", path)
+        except GitCommandError:
+            return False
+        return bool(out.strip())
+
+    def migrate_uncommitted_to(self, worktree_path: Path, paths: list[str] | None = None) -> bool:
+        """Move uncommitted changes into ``worktree_path``.
 
         Used at commit/PR time: the agent edits in place (so hot reload shows changes), and
-        only when the user opens a PR are those edits relocated onto the branch worktree —
-        leaving the workspace clean and its branch untouched. Returns True if anything moved.
+        only when the user opens a PR are those edits relocated onto the branch worktree.
+        When ``paths`` is given, only those files are moved — the workspace keeps its other
+        (pre-existing) changes — so we commit only what the agent actually touched. Returns
+        True if anything moved.
         """
         if not self.has_uncommitted_changes():
             return False
         before = self._stash_count()
-        self.repo.git.stash("push", "--include-untracked", "-m", "agentbridge:stage")
+        args = ["push", "--include-untracked", "-m", "agentbridge:stage"]
+        if paths:
+            args += ["--", *paths]
+        self.repo.git.stash(*args)
         if self._stash_count() <= before:
-            return False
+            return False  # nothing matched the pathspec
         wt = Repo(worktree_path)
         try:
             wt.git.stash("apply", "stash@{0}")
@@ -191,16 +205,6 @@ class GitService:
         except GitCommandError as exc:
             raise GitError(f"Staging changes into the worktree failed: {exc}") from exc
         return True
-
-    def reset_workspace(self) -> None:
-        """Discard everything in the working tree, returning the workspace to a clean HEAD.
-
-        Called after a PR is opened: the edits have been relocated onto the branch worktree,
-        so the workspace (e.g. ``main``) is reset to a pristine state. Tracked changes are
-        reverted and untracked files removed; ignored files (node_modules, .venv, …) are kept.
-        """
-        self.repo.git.reset("--hard")
-        self.repo.git.clean("-fd")
 
     def status(self) -> list[FileChange]:
         """Working-tree changes as porcelain entries (staged + unstaged + untracked)."""

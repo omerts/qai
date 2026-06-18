@@ -145,9 +145,12 @@ def test_full_session_flow(client):
         # File the agent created is really on disk — it edits in place while you work.
         assert (repo / "feature.txt").exists()
 
-        # Open a PR: a branch worktree is created and the edits are committed onto it. The
-        # branch name is derived automatically (no separate "branch" step), then the
-        # workspace is reset back to a clean HEAD.
+        # A pre-existing, unrelated change the user is also working on — the agent must NOT
+        # sweep this into its PR.
+        (repo / "my_notes.txt").write_text("personal wip\n")
+
+        # Open a PR: only the agent's file is committed onto a derived branch worktree; the
+        # user's unrelated change is left in the workspace.
         ws.send_json({"type": "create_pr", "chat_id": chat_id, "title": "Add feature"})
         created = _recv_until(ws, "branch_created")
         assert created["branch"].startswith("agentbridge/")
@@ -155,11 +158,12 @@ def test_full_session_flow(client):
         pr = _recv_until(ws, "pr_created")
         assert pr["url"].endswith("/pull/7")
         assert pr["number"] == 7
-        assert not (repo / "feature.txt").exists()    # relocated onto the branch worktree
-        # Workspace is pristine again: no uncommitted changes left behind.
-        assert subprocess.run(
+        assert not (repo / "feature.txt").exists()    # the agent's file moved onto the branch
+        assert (repo / "my_notes.txt").exists()       # the unrelated change stays put
+        porcelain = subprocess.run(
             ["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True
-        ).stdout.strip() == ""
+        ).stdout
+        assert "my_notes.txt" in porcelain and "feature.txt" not in porcelain
 
 
 def test_interactive_prompt_round_trip(client):

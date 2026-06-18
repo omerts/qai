@@ -148,6 +148,23 @@ def test_migrate_uncommitted_to_relocates_changes(repo: Path, monkeypatch):
     assert svc.current_branch() == "main"
 
 
+def test_migrate_scoped_to_paths_leaves_others(repo: Path, monkeypatch):
+    """A scoped migration moves only the listed files, leaving the user's other changes."""
+    monkeypatch.setenv("AGENTBRIDGE_WORKTREE_DIR", str(repo.parent / "wt"))
+    svc = GitService(repo)
+    (repo / "agent.txt").write_text("the agent's change")
+    (repo / "user.txt").write_text("the user's unrelated change")
+
+    path = svc.ensure_worktree("agentbridge/scoped")
+    assert svc.migrate_uncommitted_to(path, paths=["agent.txt"]) is True
+
+    # Only the agent's file moved onto the branch; the user's change stays in the workspace.
+    assert (path / "agent.txt").exists()
+    assert not (repo / "agent.txt").exists()
+    assert (repo / "user.txt").exists()
+    assert svc.is_path_dirty("user.txt") and not svc.is_path_dirty("agent.txt")
+
+
 def test_status_reports_changes(repo: Path):
     svc = GitService(repo)
     (repo / "new.txt").write_text("data")

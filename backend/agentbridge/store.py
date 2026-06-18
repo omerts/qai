@@ -46,6 +46,9 @@ class ChatRecord:
     transcript: list[dict] = field(default_factory=list)
     #: Last known changed-file summary, for the footer on reopen.
     files: list[dict] = field(default_factory=list)
+    #: Workspace-relative paths the agent edited this session. Only these are committed when
+    #: opening a PR, so the user's unrelated pre-existing changes are left untouched.
+    touched: list[str] = field(default_factory=list)
 
     def meta(self) -> dict:
         """Lightweight summary for the chat list."""

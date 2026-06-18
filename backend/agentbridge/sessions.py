@@ -48,6 +48,7 @@ class Session:
 
         self.git = GitService(workspace)
         self.adapter = None
+        self._adapter_lock = asyncio.Lock()  # guards lazy adapter creation (warmup vs. first turn)
         if record.base_branch is None:
             record.base_branch = self.git.current_branch()
         self._turn_active = False
@@ -76,41 +77,53 @@ class Session:
     # Adapter lifecycle (lazy; resumes prior context when reopening a chat)
     # ------------------------------------------------------------------ #
 
+    async def warmup(self) -> None:
+        """Eagerly start the agent (spawn the CLI / open the SDK client + load workspace
+        settings/CLAUDE.md) when a chat is opened, so the first message isn't slowed by cold
+        start. Best-effort — any real failure surfaces on the first actual turn."""
+        try:
+            await self._ensure_adapter()
+        except Exception:  # noqa: BLE001
+            pass
+
     async def _ensure_adapter(self) -> None:
         if self.adapter is not None:
             return
-        try:
-            adapter = create_adapter(self.record.agent, self.workspace)
-        except KeyError as exc:
-            raise RuntimeError(str(exc)) from exc
-        if not adapter.is_available():
-            raise RuntimeError(f"Agent '{self.record.agent}' is not available on this machine.")
-
-        ctx = SessionContext(
-            session_id=self.chat_id, title=self.record.title, resume=self.record.resume_id
-        )
-        try:
-            await adapter.start(ctx)
-        except Exception:  # noqa: BLE001 — resume may fail; fall back to a fresh session
-            if not self.record.resume_id:
-                raise
+        async with self._adapter_lock:
+            if self.adapter is not None:  # another caller (e.g. warmup) won the race
+                return
             try:
-                await adapter.stop()
-            except Exception:  # noqa: BLE001
-                pass
-            adapter = create_adapter(self.record.agent, self.workspace)
-            await adapter.start(
-                SessionContext(session_id=self.chat_id, title=self.record.title, resume=None)
+                adapter = create_adapter(self.record.agent, self.workspace)
+            except KeyError as exc:
+                raise RuntimeError(str(exc)) from exc
+            if not adapter.is_available():
+                raise RuntimeError(f"Agent '{self.record.agent}' is not available on this machine.")
+
+            ctx = SessionContext(
+                session_id=self.chat_id, title=self.record.title, resume=self.record.resume_id
             )
-            self.record.resume_id = None
-            await self.send(
-                P.AgentChunk(
-                    chat_id=self.chat_id,
-                    text="(Couldn't resume the previous agent context — continuing fresh.)\n",
-                    stream="stderr",
+            try:
+                await adapter.start(ctx)
+            except Exception:  # noqa: BLE001 — resume may fail; fall back to a fresh session
+                if not self.record.resume_id:
+                    raise
+                try:
+                    await adapter.stop()
+                except Exception:  # noqa: BLE001
+                    pass
+                adapter = create_adapter(self.record.agent, self.workspace)
+                await adapter.start(
+                    SessionContext(session_id=self.chat_id, title=self.record.title, resume=None)
                 )
-            )
-        self.adapter = adapter
+                self.record.resume_id = None
+                await self.send(
+                    P.AgentChunk(
+                        chat_id=self.chat_id,
+                        text="(Couldn't resume the previous agent context — continuing fresh.)\n",
+                        stream="stderr",
+                    )
+                )
+            self.adapter = adapter
 
     # ------------------------------------------------------------------ #
     # Handlers
@@ -189,27 +202,31 @@ class Session:
             )
 
     async def _on_create_pr(self, msg: P.CreatePR) -> None:
-        """Commit the in-place edits onto a fresh branch worktree, push, open a PR, then
-        reset the workspace (e.g. ``main``) back to a clean state."""
-        if not self.git.has_uncommitted_changes() and self.record.target_branch is None:
-            await self.send(P.ErrorMessage(message="No changes to commit yet.", chat_id=self.chat_id))
+        """Commit ONLY the files the agent touched onto a fresh branch worktree, push, and
+        open a PR. The user's other (pre-existing) workspace changes are left alone."""
+        # Files the agent edited that are still actually changed on disk.
+        touched = [p for p in self.record.touched if self.git.is_path_dirty(p)]
+        if not touched and self.record.target_branch is None:
+            await self.send(P.ErrorMessage(message="No agent changes to commit yet.", chat_id=self.chat_id))
             return
         branch = self.record.target_branch or self.git.suggest_branch_name(self.record.title)
         try:
             path = self.git.ensure_worktree(branch)
-            self.git.migrate_uncommitted_to(path)
+            # Scope the migration to the agent's files: this both moves them onto the branch
+            # worktree and removes them from the workspace, leaving unrelated changes in place
+            # (so we don't need — and must not do — a destructive reset of the workspace).
+            self.git.migrate_uncommitted_to(path, paths=touched or None)
             wt_git = GitService(path)
             wt_git.commit_all(msg.title)
             wt_git.push(branch, token=self.github_token)
             pr = wt_git.create_pull_request(
                 title=msg.title, head=branch, body=msg.body or "", token=self.github_token
             )
-            # The edits now live on the branch — return the workspace to a pristine HEAD.
-            self.git.reset_workspace()
         except GitError as exc:
             await self.send(P.ErrorMessage(message=str(exc), chat_id=self.chat_id))
             return
 
+        self.record.touched = []  # committed — start fresh for any further edits in this chat
         self.record.target_branch = branch
         self.record.transcript.append({"kind": "branch", "branch": branch, "worktree_path": str(path)})
         self.record.transcript.append({"kind": "pr", "url": pr.url, "number": pr.number})
@@ -229,12 +246,28 @@ class Session:
             if event.stream == "stdout":
                 self._turn_text.append(event.text)
             await self.send(P.AgentChunk(chat_id=self.chat_id, text=event.text, stream=event.stream))
+        elif event.kind == "file_touched" and event.path:
+            # Remember what the agent itself changed (workspace-relative) so a PR commits only
+            # those files. Claude reports absolute paths; normalize for reliable git pathspecs.
+            rel = self._rel_path(event.path)
+            if rel and rel not in self.record.touched:
+                self.record.touched.append(rel)
         elif event.kind == "prompt" and event.request_id:
             await self.send(
                 P.AgentPrompt(chat_id=self.chat_id, request_id=event.request_id, prompt=event.text, options=event.options)
             )
         elif event.kind == "error":
             await self.send(P.ErrorMessage(message=event.text, chat_id=self.chat_id))
+
+    def _rel_path(self, path: str) -> str | None:
+        """Normalize an agent-reported path to a workspace-relative one (git pathspec)."""
+        p = Path(path)
+        if not p.is_absolute():
+            return path
+        try:
+            return str(p.relative_to(self.workspace))
+        except ValueError:
+            return None  # edited outside the workspace — not part of this repo's PR
 
     async def _refresh_files(self) -> None:
         try:
@@ -366,11 +399,13 @@ class ChatHub:
         record = self.store.create(agent=msg.agent, title=msg.title)
         record.base_branch = self.git.current_branch()
         self.store.save(record)
-        self.sessions[record.id] = self._make_session(record)
+        session = self._make_session(record)
+        self.sessions[record.id] = session
         await self.send(
             P.SessionStarted(chat_id=record.id, agent=record.agent, title=record.title, branch=record.base_branch)
         )
         await self._send_chats()
+        asyncio.create_task(session.warmup())  # pre-start the agent so the first turn is snappy
 
     async def _open(self, msg: P.OpenChat) -> None:
         session = await self._get_session(msg.chat_id)
@@ -395,6 +430,7 @@ class ChatHub:
                 target_branch=rec.target_branch,
             )
         )
+        asyncio.create_task(session.warmup())  # warm the (possibly resumed) agent in the background
 
     async def _delete(self, msg: P.DeleteChat) -> None:
         session = self.sessions.pop(msg.chat_id, None)
