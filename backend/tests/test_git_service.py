@@ -2,8 +2,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from git import GitCommandError
 
-from agentbridge.git_service import GitService, _ensure_git_safe_directory, parse_github_remote
+from agentbridge.git_service import GitError, GitService, _ensure_git_safe_directory, parse_github_remote
 
 
 def _safe_dirs() -> list[str]:
@@ -60,6 +61,45 @@ def test_create_branch_dedupes(repo: Path):
     svc.repo.git.checkout("main")
     b = svc.create_branch("agentbridge/x")
     assert a != b and b == "agentbridge/x-2"
+
+
+def test_authed_push_url_for_github_remote(repo: Path):
+    subprocess.run(["git", "remote", "add", "origin", "git@github.com:acme/widgets.git"], cwd=repo, check=True)
+    svc = GitService(repo)
+    assert svc._authed_push_url("origin", "tok123") == "https://x-access-token:tok123@github.com/acme/widgets.git"
+    assert svc._authed_push_url("origin", None) is None  # no token -> use the configured remote
+
+
+def test_authed_push_url_skips_non_github(repo: Path):
+    subprocess.run(["git", "remote", "add", "origin", "https://gitlab.com/a/b.git"], cwd=repo, check=True)
+    assert GitService(repo)._authed_push_url("origin", "tok") is None
+
+
+def test_push_uses_token_https_url(repo: Path, monkeypatch):
+    subprocess.run(["git", "remote", "add", "origin", "git@github.com:acme/widgets.git"], cwd=repo, check=True)
+    svc = GitService(repo)
+    seen = {}
+    # Git uses __slots__ + __getattr__ dispatch, so patch the command at the class level.
+    monkeypatch.setattr(type(svc.repo.git), "push", lambda self, *a, **k: seen.setdefault("args", a), raising=False)
+    svc.push("agentbridge/feature", token="secret")
+    # Pushed over HTTPS with the embedded token, not via ssh/--set-upstream.
+    assert "https://x-access-token:secret@github.com/acme/widgets.git" in seen["args"]
+    assert "refs/heads/agentbridge/feature:refs/heads/agentbridge/feature" in seen["args"]
+
+
+def test_push_scrubs_token_from_errors(repo: Path, monkeypatch):
+    subprocess.run(["git", "remote", "add", "origin", "git@github.com:acme/widgets.git"], cwd=repo, check=True)
+    svc = GitService(repo)
+
+    def boom(self, *a, **k):
+        raise GitCommandError(
+            "git push https://x-access-token:secret@github.com/acme/widgets.git", 128, b"denied"
+        )
+
+    monkeypatch.setattr(type(svc.repo.git), "push", boom, raising=False)
+    with pytest.raises(GitError) as ei:
+        svc.push("agentbridge/feature", token="secret")
+    assert "secret" not in str(ei.value) and "***" in str(ei.value)
 
 
 def test_ensure_worktree_leaves_workspace_branch(repo: Path, monkeypatch):

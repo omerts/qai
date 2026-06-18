@@ -237,12 +237,34 @@ class GitService:
     def has_uncommitted_changes(self) -> bool:
         return self.repo.is_dirty(untracked_files=True)
 
-    def push(self, branch: str | None = None, remote: str = "origin") -> None:
+    def _authed_push_url(self, remote: str, token: str | None) -> str | None:
+        """An HTTPS push URL with the token embedded, for GitHub remotes.
+
+        Lets us push without ssh (often absent in containers) or pre-configured credentials,
+        reusing the same token used for PR creation. Returns None when there's no token or the
+        remote isn't GitHub, in which case we fall back to the configured remote.
+        """
+        if not token:
+            return None
+        gh = self.github_repo(remote)
+        if gh is None:
+            return None
+        return f"https://x-access-token:{token}@github.com/{gh.api_path}.git"
+
+    def push(self, branch: str | None = None, remote: str = "origin", token: str | None = None) -> None:
         branch = branch or self.current_branch()
+        url = self._authed_push_url(remote, token)
         try:
-            self.repo.git.push("--set-upstream", remote, branch)
+            if url:
+                # Push straight to the tokenized HTTPS URL — no ssh / stored creds needed.
+                self.repo.git.push(url, f"refs/heads/{branch}:refs/heads/{branch}")
+            else:
+                self.repo.git.push("--set-upstream", remote, branch)
         except GitCommandError as exc:
-            raise GitError(f"Push to {remote}/{branch} failed: {exc}") from exc
+            msg = str(exc)
+            if token:
+                msg = msg.replace(token, "***")  # never leak the token in an error
+            raise GitError(f"Push to {remote}/{branch} failed: {msg}") from exc
 
     # --------------------------------------------------------------------- #
     # PR creation (GitHub)

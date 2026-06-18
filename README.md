@@ -52,7 +52,7 @@ Configuration (all optional, via env vars):
 | `AGENTBRIDGE_WORKTREE_DIR`| `<repo>/../.agentbridge-worktrees` | Where branch worktrees are created |
 | `AGENTBRIDGE_STATE_DIR`  | `~/.agentbridge` | Where chat history is persisted (per workspace) |
 | `AGENTBRIDGE_CLAUDE_SETTING_SOURCES` | `user,project` | Which Claude Code settings to load from disk (`local` omitted so no `.claude` files are written into your workspace; empty = CLI default) |
-| `GITHUB_TOKEN`/`GH_TOKEN`| —             | PR creation (falls back to `gh auth token`) |
+| `GITHUB_TOKEN`/`GH_TOKEN`| —             | Push + PR creation over HTTPS (falls back to `gh auth token`); no ssh needed |
 
 ### Run with Docker (alternative to step 1)
 

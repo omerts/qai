@@ -11,9 +11,10 @@ FROM python:3.12-slim
 
 # - git: all branch/commit/push operations run against the mounted workspace
 # - curl/ca-certificates: TLS + tooling
+# - openssh-client: fallback for ssh:// git remotes (token HTTPS push is preferred)
 # - nodejs/npm: required by the Claude Code CLI that claude-agent-sdk spawns
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git curl ca-certificates nodejs npm \
+    && apt-get install -y --no-install-recommends git curl ca-certificates openssh-client nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
 # The workspace is a bind mount owned by the host user, so Git would reject it with

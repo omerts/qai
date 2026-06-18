@@ -189,7 +189,7 @@ class Session:
             self.git.migrate_uncommitted_to(path)
             wt_git = GitService(path)
             wt_git.commit_all(msg.title)
-            wt_git.push(branch)
+            wt_git.push(branch, token=self.github_token)
             pr = wt_git.create_pull_request(
                 title=msg.title, head=branch, body=msg.body or "", token=self.github_token
             )
