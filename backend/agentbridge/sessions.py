@@ -136,6 +136,9 @@ class Session:
             )
             return
 
+        # Orient the agent on the very first turn so it doesn't hunt around for paths.
+        first_turn = not any(e.get("kind") == "agent" for e in self.record.transcript)
+
         # Record + persist the user turn immediately so history survives a crash mid-turn.
         self.record.transcript.append({"kind": "user", "text": msg.text})
         if not self.record.title:
@@ -153,7 +156,11 @@ class Session:
         self.adapter.set_auto_approve(msg.auto_approve)  # type: ignore[union-attr]
 
         text = msg.text
-        preamble = self._format_context(msg.context)
+        sections = []
+        if first_turn:
+            sections.append(self._workspace_map())
+        sections.append(self._format_context(msg.context))
+        preamble = "\n\n".join(s for s in sections if s)
         if preamble:
             text = f"{preamble}\n\n---\n\n{text}"
 
@@ -258,6 +265,20 @@ class Session:
             )
         elif event.kind == "error":
             await self.send(P.ErrorMessage(message=event.text, chat_id=self.chat_id))
+
+    def _workspace_map(self) -> str:
+        """A one-time orientation map of the repo so the agent reads the right paths instead of
+        guessing. Paths are relative to the workspace root (the agent's working directory)."""
+        try:
+            entries = self.git.top_level_entries()
+        except GitError:
+            entries = []
+        if not entries:
+            return ""
+        return (
+            "[Workspace] You are working in this repository's root directory; all paths are "
+            "relative to it. Top-level entries:\n" + "  ".join(entries)
+        )
 
     def _rel_path(self, path: str) -> str | None:
         """Normalize an agent-reported path to a workspace-relative one (git pathspec)."""

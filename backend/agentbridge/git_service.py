@@ -171,6 +171,21 @@ class GitService:
             raise GitError(f"Could not create worktree for '{branch}': {exc}") from exc
         return path
 
+    def top_level_entries(self) -> list[str]:
+        """Tracked entries at the repo root (dirs suffixed with '/'), for a quick orientation
+        map handed to the agent so it doesn't guess at paths. Empty on any error."""
+        try:
+            out = self.repo.git.ls_tree("HEAD")
+        except GitCommandError:
+            return []
+        entries: list[str] = []
+        for line in out.splitlines():
+            meta, _, name = line.partition("\t")
+            if not name:
+                continue
+            entries.append(name + ("/" if " tree " in meta else ""))
+        return sorted(entries)
+
     def is_path_dirty(self, path: str) -> bool:
         """Whether ``path`` (workspace-relative) has uncommitted changes (modified, staged,
         deleted, or untracked)."""

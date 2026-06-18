@@ -165,6 +165,16 @@ def test_migrate_scoped_to_paths_leaves_others(repo: Path, monkeypatch):
     assert svc.is_path_dirty("user.txt") and not svc.is_path_dirty("agent.txt")
 
 
+def test_top_level_entries_marks_dirs(repo: Path):
+    (repo / "apps").mkdir()
+    (repo / "apps" / "x.txt").write_text("x")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "add apps"], cwd=repo, check=True)
+    entries = GitService(repo).top_level_entries()
+    assert "apps/" in entries          # directory marked with a trailing slash
+    assert "README.md" in entries      # file unmarked
+
+
 def test_status_reports_changes(repo: Path):
     svc = GitService(repo)
     (repo / "new.txt").write_text("data")
