@@ -25,6 +25,10 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   var INSPECT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="4"/></svg>';
   var SHIELD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>';
 
+  // Tooltip text for the inspect (crosshair) button, by state.
+  var INSPECT_TIP_OFF = "Inspect mode — click, then pick an element on the page to attach it to your next message as context.";
+  var INSPECT_TIP_ON = "Inspect mode ON — click an element on the page to attach it (Esc, or click here, to cancel).";
+
   var LS_AGENT = "agentbridge:agent";
   var LS_CHAT = "agentbridge:activeChat";
   var LS_AUTO = "agentbridge:autoApprove";
@@ -124,8 +128,10 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.agentSelect.addEventListener("change", function () { self._selectAgent(); });
     this.prBtn = h("button", { class: "ab-btn", text: "Create PR", title: "Commit the agent's edits to a branch, open a pull request, and reset your workspace" });
     this.prBtn.addEventListener("click", function () { self._createPR(); });
-    this.inspectBtn = h("button", { class: "ab-iconbtn ab-inspect", title: "Select an element on the page to attach as context" });
+    this.inspectBtn = h("button", { class: "ab-iconbtn ab-inspect ab-tip" });
     this.inspectBtn.innerHTML = INSPECT_ICON;
+    this.inspectBtn.setAttribute("data-tip", INSPECT_TIP_OFF);
+    this.inspectBtn.setAttribute("aria-label", INSPECT_TIP_OFF);
     this.inspectBtn.addEventListener("click", function () { self._toggleInspect(); });
     this.autoBtn = h("button", { class: "ab-iconbtn ab-autoapprove ab-tip" });
     this.autoBtn.innerHTML = SHIELD_ICON;
@@ -470,6 +476,9 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.autoApprove = !this.autoApprove;
     lsSet(LS_AUTO, this.autoApprove ? "1" : "0");
     this._refreshAutoApproveBtn();
+    this._system(this.autoApprove
+      ? "Auto-approve on — edits and safe commands run without asking (risky commands still prompt)."
+      : "Auto-approve off — you'll confirm each file edit and command.");
   };
 
   AgentBridgeWidget.prototype._refreshAutoApproveBtn = function () {
@@ -566,6 +575,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     if (this._inspecting) { this._stopInspect(); return; }
     this._inspecting = true;
     this.inspectBtn.classList.add("active");
+    this.inspectBtn.setAttribute("data-tip", INSPECT_TIP_ON);
     var self = this;
 
     var ov = document.createElement("div");
@@ -583,13 +593,20 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this._system("Inspect mode on — click an element on the page to attach it (Esc to cancel).");
   };
 
-  AgentBridgeWidget.prototype._stopInspect = function () {
+  // `attached` is true when stopping because an element was just picked — that has its own
+  // feedback (the context chip), so we skip the "off" note in that case.
+  AgentBridgeWidget.prototype._stopInspect = function (attached) {
+    if (!this._inspecting) return;
     this._inspecting = false;
-    if (this.inspectBtn) this.inspectBtn.classList.remove("active");
+    if (this.inspectBtn) {
+      this.inspectBtn.classList.remove("active");
+      this.inspectBtn.setAttribute("data-tip", INSPECT_TIP_OFF);
+    }
     if (this._overlay) { this._overlay.remove(); this._overlay = null; }
     document.removeEventListener("mousemove", this._onMove, true);
     document.removeEventListener("click", this._onClick, true);
     document.removeEventListener("keydown", this._onKey, true);
+    if (!attached) this._system("Inspect mode off.");
   };
 
   AgentBridgeWidget.prototype._inspectTarget = function (e) {
@@ -616,7 +633,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     e.preventDefault();
     e.stopPropagation();
     this._setPendingElement(this._describeElement(el));
-    this._stopInspect();
+    this._stopInspect(true);
   };
 
   AgentBridgeWidget.prototype._describeElement = function (el) {

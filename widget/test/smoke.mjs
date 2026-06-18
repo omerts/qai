@@ -99,11 +99,34 @@ async function main() {
   await tick();
   assert.ok(!widget.shadow.querySelector(".ab-msg"), "messages not cleared on reset");
 
-  // The auto-approve shield carries a hover tooltip (data-tip) describing its state.
+  // Both icon buttons carry a hover tooltip (data-tip) describing their state.
   var auto = widget.shadow.querySelector(".ab-autoapprove.ab-tip");
   assert.ok(auto, "auto-approve button missing the ab-tip class");
   assert.ok(/Auto-approve is (ON|OFF)/.test(auto.getAttribute("data-tip") || ""),
     "auto-approve tooltip (data-tip) not set");
+  var inspect = widget.shadow.querySelector(".ab-inspect.ab-tip");
+  assert.ok(inspect, "inspect button missing the ab-tip class");
+  assert.ok(/Inspect mode/.test(inspect.getAttribute("data-tip") || ""),
+    "inspect tooltip (data-tip) not set");
+
+  // Toggling auto-approve drops a system note into the chat (on, then off).
+  widget.bridge.reset();
+  widget._toggleAutoApprove();
+  widget._toggleAutoApprove();
+  await tick();
+  var sysText = widget.shadow.querySelector(".ab-thread").textContent || "";
+  assert.ok(/Auto-approve on/.test(sysText), "auto-approve ON note missing");
+  assert.ok(/Auto-approve off/.test(sysText), "auto-approve OFF note missing");
+
+  // Turning inspect mode on and off posts matching notes (no element attached → "off").
+  widget.bridge.reset();
+  widget._toggleInspect();   // on
+  widget._stopInspect();     // off
+  await tick();
+  var insText = widget.shadow.querySelector(".ab-thread").textContent || "";
+  assert.ok(/Inspect mode on/i.test(insText), "inspect ON note missing");
+  assert.ok(/Inspect mode off/i.test(insText), "inspect OFF note missing");
+  widget.bridge.reset();
 
   // --- Per-agent theming: the active agent's accent flows to the CSS vars the thread uses ---
   widget._onAgents([
