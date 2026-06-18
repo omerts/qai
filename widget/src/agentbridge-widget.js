@@ -156,8 +156,11 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     ]);
 
     // Changed files
-    this.filesHead = h("div", { class: "ab-files-head" });
-    this.filesList = h("div");
+    // Collapsible "changed files" section: a clickable header that toggles the list, which
+    // is hidden by default.
+    this.filesHead = h("button", { class: "ab-files-head", title: "Show/hide changed files" });
+    this.filesHead.addEventListener("click", function () { self._toggleFiles(); });
+    this.filesList = h("div", { class: "ab-files-list" });
     this.files = h("div", { class: "ab-files" }, [this.filesHead, this.filesList]);
 
     // Interactive cards (agent approval prompts, branch suggestions, PR links) dock here,
@@ -792,15 +795,27 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   AgentBridgeWidget.prototype._onFileChanges = function (files) {
     this.filesList.innerHTML = "";
     if (!files || !files.length) { this.files.classList.remove("show"); return; }
-    this.filesHead.textContent = files.length + " changed file" + (files.length > 1 ? "s" : "");
+    this._renderFilesHead(files.length);
     var self = this;
     files.forEach(function (f) {
       self.filesList.appendChild(h("div", { class: "ab-file" }, [
         h("span", { class: "code", text: f.status }),
-        h("span", { text: f.path }),
+        h("span", { class: "ab-file-path", text: f.path }),
       ]));
     });
-    this.files.classList.add("show");
+    this.files.classList.add("show");  // header visible; list stays collapsed until toggled
+  };
+
+  AgentBridgeWidget.prototype._renderFilesHead = function (n) {
+    var open = this.files.classList.contains("open");
+    this.filesHead.innerHTML = '<span class="ab-files-caret" aria-hidden="true">▸</span>'
+      + '<span>' + n + ' changed file' + (n > 1 ? 's' : '') + '</span>';
+    this.filesHead.setAttribute("aria-expanded", open ? "true" : "false");
+  };
+
+  AgentBridgeWidget.prototype._toggleFiles = function () {
+    var open = this.files.classList.toggle("open");
+    this.filesHead.setAttribute("aria-expanded", open ? "true" : "false");
   };
 
   AgentBridgeWidget.prototype._onStatus = function (state) {
@@ -845,7 +860,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.bridge.reset();
     this.cardLayer.innerHTML = "";
     this.filesList.innerHTML = "";
-    this.files.classList.remove("show");
+    this.files.classList.remove("show", "open");
     this._clearPendingElement();
   };
 

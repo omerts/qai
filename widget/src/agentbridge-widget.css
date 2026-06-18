@@ -297,16 +297,34 @@
 .ab-card .ab-card-actions { display: flex; gap: 8px; margin-top: 8px; }
 .ab-prompt-input { width: 100%; margin-top: 8px; }
 
-/* Changed files */
+/* Changed files — collapsible; hidden by default, the header toggles the list */
 .ab-files {
   border-top: 1px solid var(--ab-border);
-  padding: 6px 12px; max-height: 110px; overflow-y: auto;
   font-size: 12px; display: none;
 }
 .ab-files.show { display: block; }
-.ab-files .ab-files-head { color: var(--ab-muted); margin-bottom: 4px; }
-.ab-file { font-family: var(--ab-mono); font-size: 11px; display: flex; gap: 6px; }
-.ab-file .code { color: var(--ab-accent); width: 18px; }
+.ab-files-head {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  background: none; border: none; cursor: pointer; text-align: left;
+  font: inherit; font-size: 12px; color: var(--ab-muted);
+  padding: 7px 12px;
+}
+.ab-files-head:hover { color: var(--ab-fg); }
+.ab-files-caret { display: inline-block; transition: transform .15s ease; }
+.ab-files.open .ab-files-caret { transform: rotate(90deg); }
+/* The list is collapsed by default; the header reveals it. */
+.ab-files-list {
+  display: none;
+  max-height: 120px; overflow-y: auto; overflow-x: hidden;
+  padding: 0 12px 6px;
+}
+.ab-files.open .ab-files-list { display: block; }
+.ab-file {
+  font-family: var(--ab-mono); font-size: 11px;
+  display: flex; gap: 6px; align-items: baseline; min-width: 0;
+}
+.ab-file .code { color: var(--ab-accent); width: 18px; flex: none; }
+.ab-file-path { flex: 1; min-width: 0; overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
 
 /* Composer */
 .ab-composer { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--ab-border); }

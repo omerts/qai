@@ -140,6 +140,19 @@ async function main() {
   var newBtn = widget.shadow.querySelector(".ab-newbtn");
   assert.ok(newBtn && /New chat/.test(newBtn.textContent), "new-chat button not labeled");
 
+  // Changed-files area: hidden until there are changes, then a collapsible header whose list
+  // is hidden by default and toggles open.
+  var filesEl = widget.shadow.querySelector(".ab-files");
+  assert.ok(!filesEl.classList.contains("show"), "files area should start hidden");
+  widget._onFileChanges([{ path: "apps/dashboards/app/recommendations/useOpportunityStats.ts", status: "M" }]);
+  assert.ok(filesEl.classList.contains("show"), "files area should show when there are changes");
+  assert.ok(!filesEl.classList.contains("open"), "files list should be collapsed by default");
+  assert.ok(/changed file/.test(widget.shadow.querySelector(".ab-files-head").textContent), "files header missing count");
+  widget._toggleFiles();
+  assert.ok(filesEl.classList.contains("open"), "files list should expand on toggle");
+  widget._onFileChanges([]);
+  assert.ok(!filesEl.classList.contains("show"), "files area should hide with no changes");
+
   // Toggling auto-approve drops a system note into the chat (on, then off).
   widget.bridge.reset();
   widget._toggleAutoApprove();
