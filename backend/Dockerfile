@@ -13,9 +13,13 @@ FROM python:3.12-slim
 # - curl/ca-certificates: TLS + tooling
 # - openssh-client: fallback for ssh:// git remotes (token HTTPS push is preferred)
 # - nodejs/npm: required by the Claude Code CLI that claude-agent-sdk spawns
+# - gosu: drop from root to the host user at startup (see docker-entrypoint.sh)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git curl ca-certificates openssh-client nodejs npm \
+    && apt-get install -y --no-install-recommends git curl ca-certificates openssh-client gosu nodejs npm \
     && rm -rf /var/lib/apt/lists/*
+
+# Home for the non-root runtime user the entrypoint drops to (HOME=/home/app).
+RUN mkdir -p /home/app/.claude
 
 # The workspace is a bind mount owned by the host user, so Git would reject it with
 # "detected dubious ownership". Trust any repo dir inside the container (single-tenant).
@@ -40,16 +44,19 @@ RUN pip install --no-cache-dir -e "./backend[claude]"
 # main.py's relative lookup (../../widget/dist) finds it.
 COPY widget/dist ./widget/dist
 
-# Bind to all interfaces inside the container; the workspace is the mounted repo.
+# Bind to all interfaces inside the container; the workspace is the mounted repo. HOME points
+# at the non-root runtime user's home so the Claude CLI's user settings/session store land on
+# the mounted volume (see docker-compose.yml).
 ENV AGENTBRIDGE_HOST=0.0.0.0 \
     AGENTBRIDGE_PORT=8000 \
-    AGENTBRIDGE_WORKSPACE=/workspace
+    AGENTBRIDGE_WORKSPACE=/workspace \
+    HOME=/home/app
 
 EXPOSE 8000
 
-# Mark the bind-mounted workspace as a safe git directory (its ownership usually differs
-# from the container user), then launch the server.
-RUN printf '#!/bin/sh\nset -e\ngit config --global --add safe.directory "${AGENTBRIDGE_WORKSPACE}" 2>/dev/null || true\nexec agentbridge\n' > /usr/local/bin/entrypoint.sh \
-    && chmod +x /usr/local/bin/entrypoint.sh
+# The entrypoint drops from root to the host user (PUID/PGID) so the agent's edits to the
+# bind-mounted workspace are owned by you, not root.
+COPY backend/docker-entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

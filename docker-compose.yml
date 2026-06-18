@@ -18,6 +18,11 @@ services:
       AGENTBRIDGE_HOST: 0.0.0.0
       AGENTBRIDGE_PORT: 8000
       AGENTBRIDGE_AGENT: ${AGENTBRIDGE_AGENT:-claude-code}
+      # Run the container as your host user so files the agent writes into the bind-mounted
+      # workspace stay owned by you (not root) and remain editable on the host. Set these to
+      # your `id -u` / `id -g` if they aren't 1000.
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
       # Branch worktrees live on a named volume (off the workspace mount) so they persist
       # across restarts without showing up as untracked files in the workspace.
       AGENTBRIDGE_WORKTREE_DIR: /worktrees
@@ -34,14 +39,14 @@ services:
       # The repo the agent operates on. Read-write: the agent edits files and runs git here.
       - ${WORKSPACE:?set WORKSPACE in .env to the absolute path of the repo to edit}:/workspace
       # Optional: reuse the host git identity for commits (read-only).
-      - ${HOME}/.gitconfig:/root/.gitconfig:ro
+      - ${HOME}/.gitconfig:/home/app/.gitconfig:ro
       # Branch worktrees the agent operates in (kept off the workspace mount).
       - agentbridge-worktrees:/worktrees
       # Chat history, so it survives `docker compose up/down`.
       - agentbridge-state:/state
       # Claude's own session store, so "continue a previous chat" survives restarts
       # (the resume id is meaningless without the CLI's stored conversation).
-      - agentbridge-claude-home:/root/.claude
+      - agentbridge-claude-home:/home/app/.claude
     restart: unless-stopped
 
 volumes:

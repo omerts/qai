@@ -65,6 +65,11 @@ The image bundles git and the Claude Code CLI. Your repo is bind-mounted at `/wo
 (the agent edits it and runs git there). See [docker-compose.yml](docker-compose.yml) and
 [backend/Dockerfile](backend/Dockerfile).
 
+The container drops from root to your host user so the agent's edits stay owned by you (and
+stay editable on the host). It defaults to UID/GID `1000:1000`; if `id -u`/`id -g` differ,
+set `PUID`/`PGID` in `.env`. If earlier runs left root-owned files in your repo, reclaim them
+once with `sudo chown -R $(id -u):$(id -g) /path/to/your/repo`.
+
 **Auth with your Claude subscription (no API key):** run `claude setup-token` on your host
 and put the token in `.env` as `CLAUDE_CODE_OAUTH_TOKEN` (leave `ANTHROPIC_API_KEY` empty).
 If you run the backend *directly* on a machine where you're already logged into Claude Code,
