@@ -2,16 +2,18 @@
    selectors never leak into — or inherit from — the host application. */
 
 :host {
-  --ab-accent: #4f46e5;
+  --ab-accent: #6366f1;
   --ab-accent-fg: #ffffff;
-  --ab-bg: #ffffff;
-  --ab-fg: #1f2329;
-  --ab-muted: #6b7280;
-  --ab-border: #e5e7eb;
-  --ab-surface: #f7f7f9;
+  --ab-bg: #1c1d21;
+  --ab-fg: #e7e8ea;
+  --ab-muted: #9aa0a8;
+  --ab-border: #34363c;
+  --ab-surface: #292b31;
+  --ab-tint: rgba(255, 255, 255, .08);
   --ab-radius: 14px;
   --ab-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --ab-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -83,18 +85,18 @@
 .ab-banner {
   display: none; align-items: center; gap: 8px;
   padding: 7px 12px; font-size: 12px;
-  background: #fef3c7; color: #92400e;
+  background: rgba(245, 158, 11, .16); color: #fcd34d;
   border-bottom: 1px solid var(--ab-border);
 }
 .ab-banner.show { display: flex; }
-.ab-banner.down { background: #fee2e2; color: #991b1b; }
+.ab-banner.down { background: rgba(239, 68, 68, .16); color: #fca5a5; }
 .ab-banner-text { flex: 1; }
 .ab-banner-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: ab-pulse 1s infinite; flex: none; }
 .ab-banner-retry {
   border: 1px solid currentColor; background: transparent; color: inherit;
   border-radius: 6px; padding: 2px 8px; cursor: pointer; font: inherit; font-size: 11px;
 }
-.ab-banner-retry:hover { background: rgba(0,0,0,.06); }
+.ab-banner-retry:hover { background: var(--ab-tint); }
 .ab-iconbtn {
   background: none; border: none; cursor: pointer; color: var(--ab-muted);
   font-size: 18px; line-height: 1; padding: 4px;
@@ -141,7 +143,7 @@
   text-overflow: ellipsis; max-width: 260px;
 }
 .ab-chip-x {
-  border: none; background: rgba(0,0,0,.06); color: var(--ab-muted);
+  border: none; background: var(--ab-tint); color: var(--ab-muted);
   border-radius: 50%; width: 18px; height: 18px; cursor: pointer; line-height: 1; font-size: 11px;
 }
 
@@ -174,11 +176,11 @@
 .ab-msg.ab-md a { color: var(--ab-accent); text-decoration: underline; }
 .ab-msg.ab-md code {
   font-family: var(--ab-mono); font-size: .92em;
-  background: rgba(0,0,0,.06); padding: 1px 5px; border-radius: 4px;
+  background: var(--ab-tint); padding: 1px 5px; border-radius: 4px;
 }
 .ab-msg.ab-md pre {
   margin: 0 0 8px; padding: 9px 11px; overflow-x: auto;
-  background: rgba(0,0,0,.06); border-radius: 8px;
+  background: var(--ab-tint); border-radius: 8px;
 }
 .ab-msg.ab-md pre code { background: none; padding: 0; font-size: 12px; line-height: 1.45; white-space: pre; }
 .ab-msg.ab-md blockquote {
@@ -214,8 +216,8 @@
 .ab-msg.user { align-self: flex-end; background: var(--ab-accent); color: var(--ab-accent-fg); border-bottom-right-radius: 4px; }
 .ab-msg.agent { align-self: flex-start; background: var(--ab-surface); border-bottom-left-radius: 4px; }
 .ab-msg.agent.thinking { font-style: italic; color: var(--ab-muted); }
-.ab-msg.agent.stderr { color: #92400e; background: #fef3c7; font-size: 12px; }
-.ab-msg.error { align-self: stretch; background: #fee2e2; color: #991b1b; }
+.ab-msg.agent.stderr { color: #fcd34d; background: rgba(245, 158, 11, .14); font-size: 12px; }
+.ab-msg.error { align-self: stretch; background: rgba(239, 68, 68, .16); color: #fca5a5; }
 .ab-msg.system { align-self: center; background: transparent; color: var(--ab-muted); font-size: 12px; }
 
 /* Card layer: interactive cards docked above the composer */
@@ -233,7 +235,7 @@
   font-size: 12px;
 }
 .ab-card .ab-card-title { font-weight: 600; margin-bottom: 4px; }
-.ab-card code { font-family: var(--ab-mono); background: rgba(0,0,0,.06); padding: 1px 5px; border-radius: 4px; }
+.ab-card code { font-family: var(--ab-mono); background: var(--ab-tint); padding: 1px 5px; border-radius: 4px; }
 .ab-card .ab-card-actions { display: flex; gap: 8px; margin-top: 8px; }
 .ab-prompt-input { width: 100%; margin-top: 8px; }
 
