@@ -123,6 +123,7 @@ def _install_parser_tolerance() -> None:
 class ClaudeCodeAdapter(AgentAdapter):
     name = "claude-code"
     label = "Claude Code"
+    theme = {"accent": "#d97757", "accentFg": "#ffffff"}  # Claude clay
 
     #: Overridable hook so tests can inject a fake client without the real SDK/CLI.
     client_factory: Callable[..., Any] | None = None

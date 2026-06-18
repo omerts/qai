@@ -14,12 +14,11 @@
  * selected agent + active chat in localStorage (so a refresh restores them), and replays a
  * chat's transcript from the server when reopened.
  */
+import STYLES from "./agentbridge-widget.css";
+import { createThreadBridge, mountThread } from "./thread.jsx";
+
 (function () {
   "use strict";
-
-  // The build step replaces this placeholder with the contents of agentbridge-widget.css.
-  // When running un-built from /widget-src, we fall back to fetching the sibling .css.
-  var STYLES = "/*__INJECT_CSS__*/";
 
   var ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
   // Crosshair "select element" icon (devtools-style inspector).
@@ -59,7 +58,7 @@
     this.sessionAgent = null;
     this.branch = null;
     this.targetBranch = null;
-    this.currentAgentMsg = null; // accumulating agent bubble for the active turn
+    this.bridge = createThreadBridge(); // external store backing the assistant-ui thread
     this.reconnectDelay = 1000;
     this.connState = "connecting"; // connecting | connected | down
     this._everConnected = false;
@@ -79,17 +78,17 @@
     this.shadow = host.attachShadow({ mode: "open" });
 
     var style = document.createElement("style");
+    style.textContent = STYLES;
     this.shadow.appendChild(style);
-    if (STYLES.indexOf("__INJECT_CSS__") !== -1 && this.scriptSrc) {
-      // Un-built: pull the sibling stylesheet.
-      var cssUrl = this.scriptSrc.replace(/[^/]*$/, "agentbridge-widget.css");
-      fetch(cssUrl).then(function (r) { return r.text(); }).then(function (t) { style.textContent = t; });
-    } else {
-      style.textContent = STYLES;
-    }
 
     this._buildUI();
+    this._mountThread();
     this._connect();
+  };
+
+  // Mount the assistant-ui React thread into the messages container (now inside the shadow DOM).
+  AgentBridgeWidget.prototype._mountThread = function () {
+    this.threadRoot = mountThread(this.messages, this.bridge);
   };
 
   AgentBridgeWidget.prototype._buildUI = function () {
@@ -139,7 +138,7 @@
     ]);
     this._refreshAutoApproveBtn();
 
-    // Messages
+    // Messages — host node for the assistant-ui React thread (mounted in _mountThread).
     this.messages = h("div", { class: "ab-messages" });
 
     // Chat-list drawer (overlays the messages area when open)
@@ -153,6 +152,10 @@
     this.filesHead = h("div", { class: "ab-files-head" });
     this.filesList = h("div");
     this.files = h("div", { class: "ab-files" }, [this.filesHead, this.filesList]);
+
+    // Interactive cards (agent approval prompts, branch suggestions, PR links) dock here,
+    // just above the composer — the message list itself is now React/assistant-ui.
+    this.cardLayer = h("div", { class: "ab-cards" });
 
     // Pending attached-element chip
     this.contextBar = h("div", { class: "ab-context-bar" });
@@ -175,7 +178,7 @@
     ]);
 
     var body = h("div", { class: "ab-body" }, [this.messages, this.drawer]);
-    var panel = h("div", { class: "ab-panel" }, [header, this.banner, controls, body, this.files, this.contextBar, composer]);
+    var panel = h("div", { class: "ab-panel" }, [header, this.banner, controls, body, this.files, this.cardLayer, this.contextBar, composer]);
     this.root.appendChild(this.bubble);
     this.root.appendChild(panel);
     this.shadow.appendChild(this.root);
@@ -308,7 +311,7 @@
       case "status": return this._isActive(msg) && this._onStatus(msg.state);
       case "error":
         if (msg.chat_id && msg.chat_id !== this.activeChatId) return;
-        return this._addMsg("error", msg.message);
+        return this.bridge.addSystem(msg.message, "error");
     }
   };
 
@@ -329,6 +332,7 @@
       if (a.name === self.selectedAgent && a.available) { opt.selected = true; restored = true; }
     });
     if (!restored) { placeholder.selected = true; this.selectedAgent = null; }
+    this._applyTheme();
   };
 
   AgentBridgeWidget.prototype._onChats = function (chats) {
@@ -371,6 +375,7 @@
   AgentBridgeWidget.prototype._selectAgent = function () {
     this.selectedAgent = this.agentSelect.value || null;
     if (this.selectedAgent) lsSet(LS_AGENT, this.selectedAgent);
+    this._applyTheme();
     // First-run convenience: if nothing is open yet, start a chat right away.
     if (this.selectedAgent && !this.activeChatId) this._newChat();
   };
@@ -405,6 +410,7 @@
     this._setChatActive(true);
     this._closeDrawer();
     this._renderChatList();
+    this._applyTheme();
   };
 
   AgentBridgeWidget.prototype._onChatHistory = function (msg) {
@@ -420,11 +426,11 @@
 
   AgentBridgeWidget.prototype._renderEntry = function (e) {
     switch (e.kind) {
-      case "user": return this._addMsg("user", e.text || "");
-      case "agent": return this._addMsg("agent", e.text || "");
-      case "system": return this._system(e.text || "");
+      case "user": return this.bridge.addUser(e.text || "");
+      case "agent": return this.bridge.addAgent(e.text || "");
+      case "system": return this.bridge.addSystem(e.text || "");
       case "branch":
-        return this._system(e.worktree_path
+        return this.bridge.addSystem(e.worktree_path
           ? "Committed to " + e.branch + " (" + e.worktree_path + ")"
           : "Target branch: " + e.branch);
       case "pr": return this._prLink(e.url, e.number);
@@ -439,15 +445,16 @@
       this._resetChatView();
       this._setChatActive(false);
       this._showEmptyState();
+      this._applyTheme();
     }
   };
 
   AgentBridgeWidget.prototype._showEmptyState = function () {
-    this.messages.innerHTML = "";
     var hint = this.chats.length
       ? "Open a previous chat from ☰, or press + for a new one."
       : "Pick an agent above and press + to start a chat.";
-    this.messages.appendChild(h("div", { class: "ab-empty", text: hint }));
+    this.bridge.reset();
+    this.bridge.setEmptyHint(hint);
   };
 
   // ---- Actions ---------------------------------------------------------- //
@@ -456,9 +463,8 @@
     var text = this.input.value.trim();
     if (!text) return;
     if (!this.activeChatId) { this._newChatHint(); return; }
-    this._addMsg("user", text);
+    this.bridge.addUser(text);
     this.input.value = "";
-    this.currentAgentMsg = null;
     var context = { page: this._collectPageContext() };
     if (this.pendingElement) context.element = this.pendingElement;
     this._send({
@@ -743,13 +749,7 @@
   // ---- Rendering -------------------------------------------------------- //
 
   AgentBridgeWidget.prototype._onChunk = function (msg) {
-    var cls = msg.stream === "thinking" ? "agent thinking" : (msg.stream === "stderr" ? "agent stderr" : "agent");
-    if (!this.currentAgentMsg || this.currentAgentMsg._stream !== msg.stream) {
-      this.currentAgentMsg = this._addMsg(cls, "");
-      this.currentAgentMsg._stream = msg.stream;
-    }
-    this.currentAgentMsg.textContent += msg.text;
-    this._scroll();
+    this.bridge.chunk(msg.text, msg.stream);
   };
 
   AgentBridgeWidget.prototype._onPrompt = function (msg) {
@@ -810,6 +810,7 @@
   AgentBridgeWidget.prototype._onStatus = function (state) {
     this.statusDot.classList.toggle("working", state === "working");
     this.sendBtn.disabled = state === "working";
+    this.bridge.setRunning(state === "working");
   };
 
   AgentBridgeWidget.prototype._prLink = function (url, number) {
@@ -821,15 +822,10 @@
 
   // ---- DOM helpers ------------------------------------------------------ //
 
-  AgentBridgeWidget.prototype._addMsg = function (cls, text) {
-    var el = h("div", { class: "ab-msg " + cls, text: text });
-    this.messages.appendChild(el);
-    this._scroll();
-    return el;
-  };
+  // A system note in the thread (rendered by assistant-ui as a system message).
+  AgentBridgeWidget.prototype._system = function (text) { this.bridge.addSystem(text); };
 
-  AgentBridgeWidget.prototype._system = function (text) { this._addMsg("system", text); };
-
+  // Interactive cards still live in the (vanilla) card layer above the composer.
   AgentBridgeWidget.prototype._card = function (title, bodyText, actions) {
     var card = h("div", { class: "ab-card" }, [
       h("div", { class: "ab-card-title", text: title }),
@@ -837,17 +833,51 @@
     ]);
     var actionsRow = h("div", { class: "ab-card-actions" }, actions || []);
     card.appendChild(actionsRow);
-    this.messages.appendChild(card);
-    this._scroll();
+    this.cardLayer.appendChild(card);
     return card;
   };
 
   AgentBridgeWidget.prototype._resetChatView = function () {
-    this.messages.innerHTML = "";
+    this.bridge.reset();
+    this.cardLayer.innerHTML = "";
     this.filesList.innerHTML = "";
     this.files.classList.remove("show");
-    this.currentAgentMsg = null;
     this._clearPendingElement();
+  };
+
+  // ---- Per-agent theming ------------------------------------------------ //
+  // The active agent's accent (sent by the server in AgentInfo.theme) is set as inline CSS
+  // variables on the widget root, overriding the :host defaults. These cascade into the
+  // assistant-ui React thread too (its bubbles/links use var(--ab-accent)), so the whole
+  // widget — shell and thread — recolors to the selected agent.
+
+  AgentBridgeWidget.prototype._agentTheme = function (name) {
+    for (var i = 0; i < this.agents.length; i++) {
+      if (this.agents[i].name === name) return this.agents[i].theme || null;
+    }
+    return null;
+  };
+
+  // The agent whose theme should show: the open chat's agent (new or reopened) wins;
+  // otherwise the agent selected in the picker.
+  AgentBridgeWidget.prototype._activeAgentName = function () {
+    if (this.sessionAgent) return this.sessionAgent;
+    if (this.activeChatId) {
+      for (var i = 0; i < this.chats.length; i++) {
+        if (this.chats[i].id === this.activeChatId) return this.chats[i].agent;
+      }
+    }
+    return this.selectedAgent;
+  };
+
+  AgentBridgeWidget.prototype._applyTheme = function () {
+    if (!this.root) return;
+    var theme = this._agentTheme(this._activeAgentName());
+    var vars = { accent: "--ab-accent", accentFg: "--ab-accent-fg" };
+    for (var key in vars) {
+      if (theme && theme[key]) this.root.style.setProperty(vars[key], theme[key]);
+      else this.root.style.removeProperty(vars[key]);
+    }
   };
 
   AgentBridgeWidget.prototype._updateBranchLabel = function () {
@@ -870,9 +900,9 @@
     this.input.disabled = !on;
   };
 
-  AgentBridgeWidget.prototype._scroll = function () {
-    this.messages.scrollTop = this.messages.scrollHeight;
-  };
+  // Scrolling is handled by assistant-ui's <ThreadViewport> auto-scroll; kept as a no-op
+  // so any stray caller is harmless.
+  AgentBridgeWidget.prototype._scroll = function () {};
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, function (c) {

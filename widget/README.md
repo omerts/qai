@@ -1,24 +1,57 @@
 # AgentBridge widget
 
-A zero-dependency, framework-agnostic chat bubble that talks to the AgentBridge backend
-over WebSocket. It renders entirely inside a **Shadow DOM**, so it never inherits or leaks
-CSS to/from the host app.
+A framework-agnostic chat bubble that talks to the AgentBridge backend over WebSocket. It
+renders entirely inside a **Shadow DOM**, so it never inherits or leaks CSS to/from the host
+app. The shell (bubble, controls, inspector, drawer, composer) is plain DOM; the **message
+thread** is rendered with [assistant-ui](https://www.assistant-ui.com/) (React) mounted
+inside the same Shadow DOM, giving streaming, markdown, and reasoning rendering.
 
 ## Files
 
-- `src/agentbridge-widget.js` — the widget source (the JS is the source of truth)
+- `src/agentbridge-widget.js` — the widget shell, WebSocket, controls (entry point)
+- `src/thread.jsx` — the assistant-ui React thread + the external-store bridge
 - `src/agentbridge-widget.css` — styles, injected into the Shadow DOM
-- `build.py` — inlines the CSS into the JS to produce `dist/agentbridge-widget.js`
+- `build.mjs` — esbuild bundler → `dist/agentbridge-widget.js` (single self-contained IIFE)
+- `test/smoke.mjs` — jsdom smoke test (mounts the bundle, streams, checks markdown)
 - `examples/` — embed snippets for plain HTML, React, Vue, and Angular
 
 ## Build
 
+Prerequisites: **Node 18+** (build toolchain) and the Python backend (to serve the bundle).
+
 ```bash
-python widget/build.py     # writes dist/agentbridge-widget.js (self-contained)
+cd widget
+npm install            # one-time: React, assistant-ui, esbuild
+npm run build          # → dist/agentbridge-widget.js (self-contained IIFE, ~150 KB gzipped)
+npm run watch          # rebuild on change (unminified, with sourcemap)
+npm test               # jsdom smoke test (mount, stream, markdown, per-agent theming)
 ```
 
-The backend serves the built bundle at `/widget/agentbridge-widget.js` and the raw source
-at `/widget-src/` (the source build fetches its CSS at runtime).
+The bundle in `dist/` is **committed** (the backend and Docker image serve it directly), so
+rebuild and commit `dist/` after changing the source. Because the source is now React/JSX
+modules, the raw `src/` is no longer directly embeddable — always embed the built bundle.
+
+## Run (see it live)
+
+The widget is hosted by the backend and embedded in a web page:
+
+1. **Build the bundle** (above) so `dist/agentbridge-widget.js` exists.
+2. **Start the backend** — it serves the bundle at `/widget/agentbridge-widget.js` and the
+   WebSocket at `/ws`. From `backend/`:
+
+   ```bash
+   python -m venv .venv && . .venv/bin/activate
+   pip install -e ".[claude,dev]"
+   AGENTBRIDGE_WORKSPACE=/path/to/your/repo agentbridge   # serves http://127.0.0.1:8000
+   ```
+
+   Or, from the repo root, `docker compose up --build`. See the
+   [backend README](../backend/README.md) for workspace and auth details.
+3. **Embed the script** (see [Embed](#embed) below) on a page served by your app's dev
+   server — pointed at the same repo — and the chat bubble appears in the corner.
+
+During UI work, run `npm run watch` in one terminal and the backend in another, then refresh
+the host page to pick up rebuilds.
 
 ## Embed
 

@@ -24,6 +24,7 @@ from .base import AgentAdapter, AgentEvent, Capabilities, SessionContext
 class CopilotAdapter(AgentAdapter):
     name = "copilot"
     label = "GitHub Copilot"
+    theme = {"accent": "#6e40c9", "accentFg": "#ffffff"}  # GitHub purple
 
     @classmethod
     def is_available(cls) -> bool:

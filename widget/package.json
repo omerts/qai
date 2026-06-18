@@ -1,0 +1,21 @@
+{
+  "name": "agentbridge-widget",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Embeddable AgentBridge chat widget (React + assistant-ui, Shadow DOM)",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "test": "node test/smoke.mjs"
+  },
+  "dependencies": {
+    "@assistant-ui/react": "^0.14.22",
+    "@assistant-ui/react-markdown": "^0.14.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "jsdom": "^29.1.1"
+  }
+}

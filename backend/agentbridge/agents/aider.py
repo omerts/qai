@@ -25,6 +25,7 @@ from .base import AgentAdapter, AgentEvent, Capabilities, SessionContext
 class AiderAdapter(AgentAdapter):
     name = "aider"
     label = "Aider"
+    theme = {"accent": "#15803d", "accentFg": "#ffffff"}  # Aider green
 
     @classmethod
     def is_available(cls) -> bool:

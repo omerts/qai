@@ -29,6 +29,10 @@ class AgentInfo(BaseModel):
     label: str
     available: bool
     capabilities: dict[str, bool] = Field(default_factory=dict)
+    #: Optional accent theming the widget applies when this agent is selected/active.
+    #: Keys map to CSS variables: ``accent`` -> ``--ab-accent``, ``accentFg`` -> ``--ab-accent-fg``.
+    #: Empty => the widget keeps its default accent.
+    theme: dict[str, str] = Field(default_factory=dict)
 
 
 class FileChange(BaseModel):

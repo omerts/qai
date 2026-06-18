@@ -87,6 +87,10 @@ class AgentAdapter(ABC):
     name: str = "agent"
     #: human-friendly label for the agent picker
     label: str = "Agent"
+    #: optional accent theming the widget applies when this agent is active. Keys map to
+    #: CSS variables: ``accent`` -> ``--ab-accent``, ``accentFg`` -> ``--ab-accent-fg``.
+    #: Empty (the default) keeps the widget's built-in accent.
+    theme: dict[str, str] = {}
 
     def __init__(self, workspace: Path) -> None:
         self.workspace = workspace

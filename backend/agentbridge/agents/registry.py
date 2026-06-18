@@ -48,6 +48,12 @@ def list_agent_info() -> list[AgentInfo]:
         except Exception:  # noqa: BLE001 — never let one adapter break the list
             caps = {}
         infos.append(
-            AgentInfo(name=name, label=cls.label, available=available, capabilities=caps)
+            AgentInfo(
+                name=name,
+                label=cls.label,
+                available=available,
+                capabilities=caps,
+                theme=dict(cls.theme),
+            )
         )
     return infos

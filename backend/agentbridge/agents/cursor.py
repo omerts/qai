@@ -36,6 +36,7 @@ _FILE_TOOLS = {"edit", "write", "create", "multiedit", "str_replace", "apply_pat
 class CursorAdapter(AgentAdapter):
     name = "cursor"
     label = "Cursor"
+    theme = {"accent": "#111827", "accentFg": "#ffffff"}  # Cursor near-black
 
     def __init__(self, workspace: Path) -> None:
         super().__init__(workspace)
