@@ -8,7 +8,7 @@
 services:
   backend:
     build:
-      context: .                     # repo root — needed to include widget/dist
+      context: . # repo root — needed to include widget/dist
       dockerfile: backend/Dockerfile
     image: agentbridge-backend
     ports:
