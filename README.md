@@ -7,8 +7,9 @@ AgentBridge has three parts:
 
 1. **Backend** (`backend/`) — a FastAPI server that orchestrates coding agents
    (Claude Code, Cursor, Aider, Copilot) against your local repo and handles git/PR.
-2. **Widget** (`widget/`) — a vanilla-JS chat bubble you drop into any React/Angular/Vue
-   (or plain HTML) frontend with a single `<script>` tag.
+2. **Widget** (`widget/`) — a Shadow-DOM chat bubble you drop into any React/Angular/Vue
+   (or plain HTML) frontend with a single `<script>` tag. The shell is plain DOM; the
+   message thread is rendered with [assistant-ui](https://www.assistant-ui.com/) (React).
 3. **Session workflow** — chat with the agent, **branch when you decide to** (the agent
    only *suggests* branching), then open a pull request when done.
 
@@ -72,7 +73,7 @@ unset so it doesn't fall back to API billing).
 ### 2. Build & embed the widget
 
 ```bash
-python widget/build.py                   # produces widget/dist/agentbridge-widget.js
+cd widget && npm install && npm run build   # produces widget/dist/agentbridge-widget.js
 ```
 
 ```html
@@ -193,5 +194,5 @@ pytest                                   # protocol, git service, registry, sess
 
 ```
 backend/   FastAPI server, agent adapters, git service, WS protocol
-widget/    vanilla-JS Shadow-DOM widget + build script + framework examples
+widget/    Shadow-DOM widget (React/assistant-ui thread) + esbuild build + framework examples
 ```
