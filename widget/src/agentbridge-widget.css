@@ -130,6 +130,21 @@
 .ab-iconbtn.ab-autoapprove svg { width: 16px; height: 16px; }
 .ab-iconbtn.ab-autoapprove.active { color: #fff; background: #16a34a; }
 
+/* Hover tooltip for icon buttons (text from the data-tip attribute). Anchored to the
+   button's right edge so it expands leftward and stays inside the panel's clipped box. */
+.ab-tip { position: relative; }
+.ab-tip[data-tip]:hover::after, .ab-tip[data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute; top: calc(100% + 6px); right: 0;
+  width: max-content; max-width: 230px;
+  background: #0f1013; color: var(--ab-fg);
+  border: 1px solid var(--ab-border); border-radius: 8px;
+  padding: 6px 9px; font-size: 11px; line-height: 1.4;
+  white-space: normal; text-align: left;
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  z-index: 20; pointer-events: none;
+}
+
 /* Pending attached-element chip */
 .ab-context-bar { display: none; padding: 6px 12px 0; }
 .ab-context-bar.show { display: block; }

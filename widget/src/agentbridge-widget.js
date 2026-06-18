@@ -127,7 +127,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.inspectBtn = h("button", { class: "ab-iconbtn ab-inspect", title: "Select an element on the page to attach as context" });
     this.inspectBtn.innerHTML = INSPECT_ICON;
     this.inspectBtn.addEventListener("click", function () { self._toggleInspect(); });
-    this.autoBtn = h("button", { class: "ab-iconbtn ab-autoapprove" });
+    this.autoBtn = h("button", { class: "ab-iconbtn ab-autoapprove ab-tip" });
     this.autoBtn.innerHTML = SHIELD_ICON;
     this.autoBtn.addEventListener("click", function () { self._toggleAutoApprove(); });
     this.branchLabel = h("span", { class: "ab-branch-label" });
@@ -475,9 +475,13 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   AgentBridgeWidget.prototype._refreshAutoApproveBtn = function () {
     if (!this.autoBtn) return;
     this.autoBtn.classList.toggle("active", this.autoApprove);
-    this.autoBtn.title = this.autoApprove
+    var tip = this.autoApprove
       ? "Auto-approve is ON — edits and safe commands run without asking (risky commands still prompt). Click to require approval."
       : "Auto-approve is OFF — you confirm each file edit and command. Click to let the agent run them automatically.";
+    // Drive the custom .ab-tip tooltip (data-tip) and keep aria-label for screen readers;
+    // no native `title` so the two tooltips don't show at once.
+    this.autoBtn.setAttribute("data-tip", tip);
+    this.autoBtn.setAttribute("aria-label", tip);
   };
 
   AgentBridgeWidget.prototype._newChatHint = function () {

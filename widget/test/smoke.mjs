@@ -99,6 +99,12 @@ async function main() {
   await tick();
   assert.ok(!widget.shadow.querySelector(".ab-msg"), "messages not cleared on reset");
 
+  // The auto-approve shield carries a hover tooltip (data-tip) describing its state.
+  var auto = widget.shadow.querySelector(".ab-autoapprove.ab-tip");
+  assert.ok(auto, "auto-approve button missing the ab-tip class");
+  assert.ok(/Auto-approve is (ON|OFF)/.test(auto.getAttribute("data-tip") || ""),
+    "auto-approve tooltip (data-tip) not set");
+
   // --- Per-agent theming: the active agent's accent flows to the CSS vars the thread uses ---
   widget._onAgents([
     { name: "claude-code", label: "Claude Code", available: true, theme: { accent: "#d97757", accentFg: "#ffffff" } },
