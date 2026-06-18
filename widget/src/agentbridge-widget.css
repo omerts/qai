@@ -74,7 +74,23 @@
   background: var(--ab-surface);
   border-bottom: 1px solid var(--ab-border);
 }
-.ab-header .ab-title { font-weight: 600; font-size: 14px; flex: 1; }
+.ab-header .ab-title {
+  font-weight: 600; font-size: 14px; flex: 1;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* New-chat button — a labeled accent pill so the primary action is obvious */
+.ab-newbtn {
+  display: inline-flex; align-items: center; gap: 4px;
+  font: inherit; font-size: 12px; font-weight: 600; line-height: 1;
+  background: var(--ab-accent); color: var(--ab-accent-fg);
+  border: none; border-radius: 999px; padding: 6px 11px 6px 9px;
+  cursor: pointer; white-space: nowrap;
+  transition: filter .15s ease;
+}
+.ab-newbtn:hover { filter: brightness(1.1); }
+.ab-newbtn:disabled { opacity: .45; cursor: not-allowed; filter: none; }
+.ab-newbtn-plus { font-size: 15px; font-weight: 700; }
 .ab-status-dot { width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; }
 .ab-status-dot.connected { background: #22c55e; }
 .ab-status-dot.down { background: #ef4444; }

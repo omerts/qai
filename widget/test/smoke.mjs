@@ -124,6 +124,10 @@ async function main() {
   assert.ok(/Inspect mode/.test(inspect.getAttribute("data-tip") || ""),
     "inspect tooltip (data-tip) not set");
 
+  // The new-chat button is a labeled pill (clearer than a bare "+").
+  var newBtn = widget.shadow.querySelector(".ab-newbtn");
+  assert.ok(newBtn && /New chat/.test(newBtn.textContent), "new-chat button not labeled");
+
   // Toggling auto-approve drops a system note into the chat (on, then off).
   widget.bridge.reset();
   widget._toggleAutoApprove();
