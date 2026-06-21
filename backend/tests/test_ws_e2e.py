@@ -2,7 +2,7 @@
 
 Registers an in-memory FakeAdapter, points the server at a temp git repo, and drives the
 full flow: list_agents -> start_session -> user_message (agent edits a file) ->
-create_pr (GitHub mocked) -> workspace reset.
+create_pr (GitHub mocked), committing only the agent's files.
 """
 
 import asyncio
@@ -113,11 +113,17 @@ def client(tmp_path: Path, monkeypatch):
         def json(self):
             return {"html_url": "https://github.com/acme/widgets/pull/7", "number": 7}
 
-    monkeypatch.setattr(git_service.httpx, "post", lambda *a, **k: FakeResp())
+    pr_payloads: list[dict] = []
+
+    def _fake_post(*a, **k):
+        pr_payloads.append(k.get("json") or {})
+        return FakeResp()
+
+    monkeypatch.setattr(git_service.httpx, "post", _fake_post)
 
     from agentbridge.main import app
 
-    return TestClient(app), tmp_path
+    return TestClient(app), tmp_path, pr_payloads
 
 
 def _recv_until(ws, type_, limit=20):
@@ -129,7 +135,7 @@ def _recv_until(ws, type_, limit=20):
 
 
 def test_full_session_flow(client):
-    tc, repo = client
+    tc, repo, _ = client
     with tc.websocket_connect("/ws") as ws:
         ws.send_json({"type": "list_agents"})
         agents = {a["name"] for a in _recv_until(ws, "agents")["agents"]}
@@ -166,10 +172,51 @@ def test_full_session_flow(client):
         assert "my_notes.txt" in porcelain and "feature.txt" not in porcelain
 
 
+def test_second_pr_does_not_commit_manual_changes(client):
+    """The reported bug: after a PR, a purely manual edit (no agent turn) must NOT be swept
+    into a commit. With nothing of the agent's left, Create PR reports that and touches nothing."""
+    tc, repo, _ = client
+    with tc.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "start_session", "agent": "fake", "title": "feat"})
+        chat_id = _recv_until(ws, "session_started")["chat_id"]
+        ws.send_json({"type": "user_message", "chat_id": chat_id, "text": "add a feature"})
+        _recv_until(ws, "file_changes")
+        ws.send_json({"type": "create_pr", "chat_id": chat_id, "title": "Add feature"})
+        _recv_until(ws, "pr_created")
+
+        # The user now edits a file by hand — no agent involvement.
+        (repo / "manual.txt").write_text("hand-edited\n")
+        ws.send_json({"type": "create_pr", "chat_id": chat_id})
+        err = _recv_until(ws, "error")
+        assert "No new agent changes" in err["message"]
+        # The manual change is untouched — still dirty in the workspace, never committed.
+        porcelain = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True
+        ).stdout
+        assert "manual.txt" in porcelain
+
+
+def test_pr_title_auto_derived_from_agent_summary(client):
+    """With no title typed, the backend names the PR from the agent's own reply."""
+    tc, repo, pr_payloads = client
+    with tc.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "start_session", "agent": "fake", "title": "feat"})
+        chat_id = _recv_until(ws, "session_started")["chat_id"]
+        ws.send_json({"type": "user_message", "chat_id": chat_id, "text": "add a feature"})
+        _recv_until(ws, "file_changes")
+        # No title field at all -> derived from the agent's "Added feature.txt" reply.
+        ws.send_json({"type": "create_pr", "chat_id": chat_id})
+        _recv_until(ws, "pr_created")
+    assert pr_payloads, "PR API was not called"
+    payload = pr_payloads[-1]
+    assert payload["title"] == "Added feature.txt"
+    assert "feature.txt" in payload["body"]  # body lists the changed file
+
+
 def test_interactive_prompt_round_trip(client):
     """The turn blocks on a prompt; the server must still receive agent_response and
     route it so the turn can complete. This validates concurrent message handling."""
-    tc, repo = client
+    tc, repo, _ = client
     with tc.websocket_connect("/ws") as ws:
         ws.send_json({"type": "start_session", "agent": "ifake"})
         started = _recv_until(ws, "session_started")
@@ -190,7 +237,7 @@ def test_interactive_prompt_round_trip(client):
 
 def test_chat_persistence_and_resume(client):
     """Chats persist across connections: list, reopen with replayed history + resume id."""
-    tc, repo = client
+    tc, repo, _ = client
     with tc.websocket_connect("/ws") as ws:
         ws.send_json({"type": "start_session", "agent": "fake", "title": "first"})
         chat_id = _recv_until(ws, "session_started")["chat_id"]

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -168,6 +169,12 @@ class Session:
         self._turn_text = []
         await self.send(P.Status(chat_id=self.chat_id, state="working"))
 
+        # Snapshot the dirty set before the turn. Anything dirty *now* is the user's pre-existing
+        # work and must never be attributed to the agent; anything that becomes dirty during the
+        # turn is the agent's doing (this also catches edits made via Bash/sed that don't surface
+        # as edit-tool events).
+        before = self._dirty_paths()
+
         # Serialize across chats: only one agent turn touches the workspace at a time.
         async with self.turn_lock:
             try:
@@ -177,6 +184,10 @@ class Session:
                 await self.send(P.ErrorMessage(message=f"Agent run failed: {exc}", chat_id=self.chat_id))
             finally:
                 self._turn_active = False
+
+        for path in self._dirty_paths() - before:
+            if path not in self.record.touched:
+                self.record.touched.append(path)
 
         # Persist the agent's reply, the resume handle, and the changed-file summary.
         agent_text = "".join(self._turn_text).strip()
@@ -213,21 +224,30 @@ class Session:
         open a PR. The user's other (pre-existing) workspace changes are left alone."""
         # Files the agent edited that are still actually changed on disk.
         touched = [p for p in self.record.touched if self.git.is_path_dirty(p)]
-        if not touched and self.record.target_branch is None:
-            await self.send(P.ErrorMessage(message="No agent changes to commit yet.", chat_id=self.chat_id))
+        if not touched:
+            # Never fall back to committing *everything* — that would sweep up the user's own
+            # manual/unrelated changes. With nothing of the agent's left to commit, stop here.
+            text = (
+                "No new agent changes since the last PR."
+                if self.record.target_branch
+                else "No agent changes to commit yet."
+            )
+            await self.send(P.ErrorMessage(message=text, chat_id=self.chat_id))
             return
-        branch = self.record.target_branch or self.git.suggest_branch_name(self.record.title)
+
+        title, body = self._pr_meta(msg.title, msg.body, touched)
+        branch = self.record.target_branch or self.git.suggest_branch_name(title)
         try:
             path = self.git.ensure_worktree(branch)
             # Scope the migration to the agent's files: this both moves them onto the branch
             # worktree and removes them from the workspace, leaving unrelated changes in place
             # (so we don't need — and must not do — a destructive reset of the workspace).
-            self.git.migrate_uncommitted_to(path, paths=touched or None)
+            self.git.migrate_uncommitted_to(path, paths=touched)
             wt_git = GitService(path)
-            wt_git.commit_all(msg.title)
+            wt_git.commit_all(title)
             wt_git.push(branch, token=self.github_token)
             pr = wt_git.create_pull_request(
-                title=msg.title, head=branch, body=msg.body or "", token=self.github_token
+                title=title, head=branch, body=body, token=self.github_token
             )
         except GitError as exc:
             await self.send(P.ErrorMessage(message=str(exc), chat_id=self.chat_id))
@@ -289,6 +309,56 @@ class Session:
             return str(p.relative_to(self.workspace))
         except ValueError:
             return None  # edited outside the workspace — not part of this repo's PR
+
+    def _dirty_paths(self) -> set[str]:
+        """The set of workspace-relative paths with uncommitted changes right now."""
+        try:
+            return {c.path for c in self.git.status()}
+        except GitError:
+            return set()
+
+    # ------------------------------------------------------------------ #
+    # PR title / body
+    # ------------------------------------------------------------------ #
+
+    def _pr_meta(self, user_title: str | None, user_body: str | None, touched: list[str]) -> tuple[str, str]:
+        """Resolve the PR title and body. A title/body the user typed always wins; otherwise we
+        derive a meaningful title from the agent's own summary of what it did (its final reply),
+        and build a body from that summary plus the list of files it changed."""
+        summary = self._last_agent_text()
+        title = (user_title or "").strip()
+        if not title:
+            title = self._title_from_summary(summary) or (self.record.title or "").strip() or "AgentBridge changes"
+        title = re.sub(r"\s+", " ", title).strip().strip('"').rstrip(".")[:72] or "AgentBridge changes"
+        body = (user_body or "").strip() or self._build_pr_body(summary, touched)
+        return title, body
+
+    def _last_agent_text(self) -> str:
+        for entry in reversed(self.record.transcript):
+            if entry.get("kind") == "agent" and entry.get("text"):
+                return str(entry["text"]).strip()
+        return ""
+
+    @staticmethod
+    def _title_from_summary(summary: str) -> str:
+        """First meaningful line of the agent's reply, cleaned up into a one-line PR title."""
+        for line in summary.splitlines():
+            s = line.strip().lstrip("#-*•> ").strip()
+            s = re.sub(r"\s+", " ", s)
+            if len(s) >= 8:
+                return s[:72].rstrip(".")
+        return ""
+
+    @staticmethod
+    def _build_pr_body(summary: str, touched: list[str]) -> str:
+        parts: list[str] = []
+        if summary:
+            parts.append(summary)
+        if touched:
+            files = "\n".join(f"- `{p}`" for p in sorted(touched))
+            parts.append(f"## Files changed\n{files}")
+        parts.append("_Opened via AgentBridge._")
+        return "\n\n".join(parts)
 
     async def _refresh_files(self) -> None:
         try:

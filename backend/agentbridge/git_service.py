@@ -222,6 +222,8 @@ class GitService:
         (pre-existing) changes — so we commit only what the agent actually touched. Returns
         True if anything moved.
         """
+        if paths is not None and not paths:
+            return False  # an explicit empty scope means "move nothing" (never sweep everything)
         if not self.has_uncommitted_changes():
             return False
         before = self._stash_count()

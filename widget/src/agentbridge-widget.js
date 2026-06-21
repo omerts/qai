@@ -132,7 +132,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     // Controls: agent picker + PR + inspect
     this.agentSelect = h("select", { class: "ab-select", title: "Default agent for new chats" });
     this.agentSelect.addEventListener("change", function () { self._selectAgent(); });
-    this.prBtn = h("button", { class: "ab-btn", text: "Create PR", title: "Commit the agent's edits to a branch, open a pull request, and reset your workspace" });
+    this.prBtn = h("button", { class: "ab-btn", text: "Create PR", title: "Commit only the agent's edits to a new branch and open a pull request (your other changes stay put). Type a title first to name it, or leave blank to auto-name from the agent's summary." });
     this.prBtn.addEventListener("click", function () { self._createPR(); });
     this.inspectBtn = h("button", { class: "ab-iconbtn ab-inspect ab-tip" });
     this.inspectBtn.innerHTML = INSPECT_ICON;
@@ -559,10 +559,13 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
 
   AgentBridgeWidget.prototype._createPR = function () {
     if (!this.activeChatId) return this._newChatHint();
-    var title = (this.input.value.trim()) || ("AgentBridge: " + (this.sessionAgent || "session") + " changes");
+    // A typed title wins; otherwise let the backend name the PR from the agent's own summary.
+    var typed = this.input.value.trim();
     this.input.value = "";
-    this._send({ type: "create_pr", chat_id: this.activeChatId, title: title });
-    this._system("Creating pull request…");
+    var msg = { type: "create_pr", chat_id: this.activeChatId };
+    if (typed) msg.title = typed;
+    this._send(msg);
+    this._system(typed ? "Creating pull request…" : "Summarizing changes and creating pull request…");
   };
 
   // ---- Page context collection ----------------------------------------- //

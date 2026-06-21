@@ -110,7 +110,9 @@ class StopAgent(BaseModel):
 class CreatePR(BaseModel):
     type: Literal["create_pr"]
     chat_id: str
-    title: str
+    # Optional: when the user doesn't type one, the backend derives a meaningful title/body
+    # from the agent's own summary of the changes it made.
+    title: str | None = None
     body: str | None = None
 
 
