@@ -718,9 +718,32 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       text: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 160),
       selector: this._cssPath(el),
       component: this._resolveComponent(el),
+      // The full innermost->outermost chain of component names. The nearest one is often a
+      // library internal (e.g. Ant Design's "Wave"); the backend walks this to find the first
+      // name that maps to a file in the user's repo.
+      componentChain: this._componentChain(el),
       source: this._sourceHint(el),
       attributes: attrs
     };
+  };
+
+  AgentBridgeWidget.prototype._componentChain = function (el) {
+    var names = [];
+    try {
+      var key = Object.keys(el).find(function (k) {
+        return k.indexOf("__reactFiber$") === 0 || k.indexOf("__reactInternalInstance$") === 0;
+      });
+      if (!key) return names;
+      var seen = {};
+      for (var fiber = el[key], d = 0; fiber && d < 60; d++, fiber = fiber.return) {
+        var t = fiber.type, nm = null;
+        if (typeof t === "function") nm = t.displayName || t.name;
+        else if (t && typeof t === "object") nm = t.displayName || (t.render && (t.render.displayName || t.render.name));
+        // Components are PascalCase; skip lowercase host tags and dups.
+        if (nm && nm[0] === nm[0].toUpperCase() && !seen[nm]) { seen[nm] = 1; names.push(nm); }
+      }
+    } catch (e) {}
+    return names.slice(0, 12);
   };
 
   AgentBridgeWidget.prototype._cssPath = function (el) {

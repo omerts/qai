@@ -400,24 +400,38 @@ class Session:
             lines.append("[Element the user selected on the page]")
             if el.get("label"):
                 lines.append(f"- Element: {el['label']}")
-            if el.get("component"):
-                lines.append(f"- Owning component: {el['component']}")
-            if el.get("selector"):
-                lines.append(f"- CSS selector: {el['selector']}")
-            if el.get("text"):
-                lines.append(f"- Text content: {el['text']}")
-            # Point the agent straight at the source file. Prefer the browser's source hint (it
-            # carries a line number); when that's absent — e.g. React 19, which dropped
-            # _debugSource — fall back to locating the file by the owning component's name.
+
+            # Resolve the source file. Prefer the browser's source hint (it carries a line
+            # number); when that's absent — e.g. React 19, which dropped _debugSource — locate
+            # the file by component name. The nearest fiber component is often a library internal
+            # (e.g. Ant Design's "Wave"), so walk the component chain innermost-first and pick the
+            # first name that maps to a file in THIS repo — that's the user's component.
             src = el.get("source") if isinstance(el.get("source"), dict) else {}
             raw_file = src.get("file")
             line_suffix = f":{src.get('line')}" if src.get("line") else ""
             resolved = self.git.resolve_tracked_path(str(raw_file)) if raw_file else None
-            comp_file = (
-                self.git.resolve_component_path(str(el["component"]))
-                if not resolved and el.get("component")
-                else None
-            )
+
+            chain = el.get("componentChain") if isinstance(el.get("componentChain"), list) else []
+            candidates: list[str] = []
+            for c in [el.get("component"), *chain]:
+                if isinstance(c, str) and c and c not in candidates:
+                    candidates.append(c)
+            comp_file = comp_name = None
+            if not resolved:
+                for c in candidates:
+                    found = self.git.resolve_component_path(c)
+                    if found:
+                        comp_file, comp_name = found, c
+                        break
+
+            # Prefer the user component we actually located; else fall back to the nearest name.
+            owning = comp_name or el.get("component")
+            if owning:
+                lines.append(f"- Owning component: {owning}")
+            if el.get("selector"):
+                lines.append(f"- CSS selector: {el['selector']}")
+            if el.get("text"):
+                lines.append(f"- Text content: {el['text']}")
             if resolved:
                 lines.append(f"- Source file (open this first): {resolved}{line_suffix}")
             elif comp_file:

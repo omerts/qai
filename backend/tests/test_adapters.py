@@ -67,6 +67,25 @@ def test_format_context_locates_file_by_component_when_no_source(tmp_path: Path)
     assert "Source file (open this first): src/StatusTabs.tsx" in out
 
 
+def test_format_context_skips_library_components_via_chain(tmp_path: Path):
+    # Ant Design case: nearest component is a library internal ("Wave") not in the repo; the
+    # chain carries the user's component, which is what we resolve and report as owning.
+    _init_repo(tmp_path)
+    (tmp_path / "app" / "auth" / "login").mkdir(parents=True)
+    (tmp_path / "app" / "auth" / "login" / "LoginForm.tsx").write_text("export const LoginForm = () => null\n")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "add"], cwd=tmp_path, check=True)
+
+    session = _make_session(tmp_path, send=lambda m: _noop())
+    out = session._format_context({"element": {
+        "label": "<button>",
+        "component": "Wave",
+        "componentChain": ["Wave", "Button", "InternalButton", "LoginForm", "LoginPage"],
+    }})
+    assert "Source file (open this first): app/auth/login/LoginForm.tsx" in out
+    assert "Owning component: LoginForm" in out  # not "Wave"
+
+
 async def test_stub_adapters_unavailable_and_raise():
     assert AiderAdapter.is_available() is False
     assert CopilotAdapter.is_available() is False
