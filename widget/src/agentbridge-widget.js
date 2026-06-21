@@ -117,7 +117,12 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.bubble.innerHTML = ICON;
     this.bubbleBadge = h("span", { class: "ab-bubble-badge", title: "Agent server offline" });
     this.bubble.appendChild(this.bubbleBadge);
-    this.bubble.addEventListener("click", function () { self._toggle(true); });
+    // Click opens the chat — unless the click is the tail of a drag (then just reposition).
+    this.bubble.addEventListener("click", function () {
+      if (self._dragJustHappened) { self._dragJustHappened = false; return; }
+      self._toggle(true);
+    });
+    this._enableDrag(this.bubble, { wholeHandle: true, suppressClick: true });
 
     // Header: menu (chat list) · title · status · new chat · close
     this.statusDot = h("span", { class: "ab-status-dot" });
@@ -230,34 +235,45 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
 
   // ---- Dragging --------------------------------------------------------- //
 
-  // Drag the whole widget (panel + bubble share this.root) by a handle, switching from the
-  // CSS corner anchor to explicit left/top. Clicks on header controls are left alone, and the
-  // position is clamped to the viewport and remembered across reloads.
-  AgentBridgeWidget.prototype._enableDrag = function (handle) {
-    var self = this, dragging = false, sx = 0, sy = 0, startLeft = 0, startTop = 0;
+  // Drag the whole widget (panel + bubble share this.root) by a handle, switching from the CSS
+  // corner anchor to explicit left/top. Position is clamped to the viewport and remembered.
+  // opts.wholeHandle: the element itself is the handle (e.g. the bubble) — don't skip drags that
+  // start on it just because it's a button. opts.suppressClick: after an actual drag, swallow the
+  // trailing click so a draggable-and-clickable element (the bubble) doesn't also fire its click.
+  AgentBridgeWidget.prototype._enableDrag = function (handle, opts) {
+    opts = opts || {};
+    var self = this, dragging = false, moved = false, sx = 0, sy = 0, startLeft = 0, startTop = 0;
+    var THRESHOLD = 4;   // px of movement before a press counts as a drag (vs a click)
 
     handle.addEventListener("mousedown", function (e) {
       if (e.button !== 0) return;
-      if (e.target.closest("button, select, input, textarea, a")) return; // let controls work
+      // On a handle that contains its own controls (the header), let those controls work.
+      if (!opts.wholeHandle && e.target.closest("button, select, input, textarea, a")) return;
       var r = self.root.getBoundingClientRect();
       self._pinXY(r.left, r.top);
-      dragging = true; sx = e.clientX; sy = e.clientY; startLeft = r.left; startTop = r.top;
+      dragging = true; moved = false;
+      sx = e.clientX; sy = e.clientY; startLeft = r.left; startTop = r.top;
       document.body.style.userSelect = "none";
       e.preventDefault();
     });
 
     document.addEventListener("mousemove", function (e) {
       if (!dragging) return;
+      var dx = e.clientX - sx, dy = e.clientY - sy;
+      if (!moved && (Math.abs(dx) > THRESHOLD || Math.abs(dy) > THRESHOLD)) moved = true;
       var r = self.root.getBoundingClientRect();
-      var left = clamp(startLeft + (e.clientX - sx), 0, window.innerWidth - r.width);
-      var top = clamp(startTop + (e.clientY - sy), 0, window.innerHeight - r.height);
-      self._pinXY(left, top);
+      self._pinXY(
+        clamp(startLeft + dx, 0, window.innerWidth - r.width),
+        clamp(startTop + dy, 0, window.innerHeight - r.height)
+      );
     }, true);
 
     document.addEventListener("mouseup", function () {
       if (!dragging) return;
       dragging = false;
       document.body.style.userSelect = "";
+      if (!moved) return;   // a click, not a drag — leave position and any click handler alone
+      if (opts.suppressClick) self._dragJustHappened = true;
       var r = self.root.getBoundingClientRect();
       lsSet(LS_POS, JSON.stringify({ left: Math.round(r.left), top: Math.round(r.top) }));
     }, true);

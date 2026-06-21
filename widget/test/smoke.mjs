@@ -254,7 +254,20 @@ async function main() {
   assert.ok(widget.root.style.left && widget.root.style.top, "drag did not pin left/top");
   assert.equal(widget.root.style.right, "auto", "drag should drop the corner anchor");
 
-  console.log("OK — widget mounts, streams, renders markdown, resets, drags, and themes per agent.");
+  // The bubble is draggable too, but a drag must NOT trigger its click-to-open; a plain click must.
+  const mouse = (type, x, y) => new window.MouseEvent(type, { bubbles: true, button: 0, clientX: x, clientY: y });
+  widget._toggle(false);                                  // collapse to the bubble
+  const bubble = widget.shadow.querySelector(".ab-bubble");
+  bubble.dispatchEvent(mouse("mousedown", 100, 100));
+  window.document.dispatchEvent(mouse("mousemove", 200, 180));
+  window.document.dispatchEvent(mouse("mouseup", 200, 180));
+  assert.ok(widget._dragJustHappened, "bubble drag should flag a click to suppress");
+  bubble.dispatchEvent(mouse("click", 200, 180));
+  assert.ok(!widget.root.classList.contains("open"), "a drag must not open the chat");
+  bubble.dispatchEvent(mouse("click", 200, 180));         // a real click (no preceding drag)
+  assert.ok(widget.root.classList.contains("open"), "a plain click should open the chat");
+
+  console.log("OK — widget mounts, streams, renders markdown, resets, drags (panel + bubble), and themes per agent.");
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error("FAIL:", e.message); process.exit(1); });
