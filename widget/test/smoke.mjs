@@ -267,6 +267,15 @@ async function main() {
   bubble.dispatchEvent(mouse("click", 200, 180));         // a real click (no preceding drag)
   assert.ok(widget.root.classList.contains("open"), "a plain click should open the chat");
 
+  // Dropping near a corner must anchor by that corner (right/bottom), so the panel opens inward
+  // and never spills off-screen. (jsdom can't lay out rects, so drive the math directly.)
+  widget._setAnchorFromRect({ left: 964, right: 1020, top: 704, bottom: 760, width: 56, height: 56 });
+  assert.equal(widget._anchor.h, "right", "bottom-right drop should anchor on the right");
+  assert.equal(widget._anchor.v, "bottom", "bottom-right drop should anchor on the bottom");
+  assert.ok(widget.root.style.right !== "auto" && widget.root.style.bottom !== "auto", "corner edges not set");
+  assert.equal(widget.root.style.left, "auto", "left should be released for a right anchor");
+  assert.equal(widget.root.style.top, "auto", "top should be released for a bottom anchor");
+
   console.log("OK — widget mounts, streams, renders markdown, resets, drags (panel + bubble), and themes per agent.");
 }
 

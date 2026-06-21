@@ -228,6 +228,8 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   };
 
   AgentBridgeWidget.prototype._toggle = function (open) {
+    // Re-fit the corner anchor before showing the (larger) panel so it can't open off-screen.
+    if (open && this._anchor) { this._clampAnchor(); this._applyAnchor(); }
     this.root.classList.toggle("open", open);
     if (open) this.input.focus();
     else if (this._inspecting) this._stopInspect();
@@ -274,28 +276,66 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       document.body.style.userSelect = "";
       if (!moved) return;   // a click, not a drag — leave position and any click handler alone
       if (opts.suppressClick) self._dragJustHappened = true;
-      var r = self.root.getBoundingClientRect();
-      lsSet(LS_POS, JSON.stringify({ left: Math.round(r.left), top: Math.round(r.top) }));
+      // Convert the dragged spot into a corner anchor so the panel opens inward (stays visible).
+      self._setAnchorFromRect(self.root.getBoundingClientRect());
     }, true);
   };
 
-  // Anchor the widget at an absolute viewport position (overriding the corner CSS).
+  // While dragging, follow the pointer with raw left/top (smooth); converted to a corner anchor
+  // on drop. The panel and bubble share this.root, so anchoring by a corner keeps both aligned.
   AgentBridgeWidget.prototype._pinXY = function (left, top) {
     var s = this.root.style;
     s.left = left + "px"; s.top = top + "px"; s.right = "auto"; s.bottom = "auto";
+  };
+
+  // Effective panel size, matching the CSS max-width/height clamps.
+  AgentBridgeWidget.prototype._panelSize = function () {
+    return { w: Math.min(380, window.innerWidth - 32), h: Math.min(560, window.innerHeight - 40) };
+  };
+
+  // Derive {h, v, x, y}: which corner to anchor to (nearest), and the distance from those edges,
+  // clamped so the full panel fits in the viewport. Applied + persisted.
+  AgentBridgeWidget.prototype._setAnchorFromRect = function (r) {
+    var hRight = (r.left + r.width / 2) > window.innerWidth / 2;
+    var vBottom = (r.top + r.height / 2) > window.innerHeight / 2;
+    this._anchor = {
+      h: hRight ? "right" : "left",
+      v: vBottom ? "bottom" : "top",
+      x: hRight ? (window.innerWidth - r.right) : r.left,
+      y: vBottom ? (window.innerHeight - r.bottom) : r.top,
+    };
+    this._clampAnchor();
+    this._applyAnchor();
+    lsSet(LS_POS, JSON.stringify(this._anchor));
+  };
+
+  // Keep the anchored distances small enough that the panel can't open off-screen.
+  AgentBridgeWidget.prototype._clampAnchor = function () {
+    var a = this._anchor; if (!a) return;
+    var ps = this._panelSize();
+    a.x = clamp(a.x, 8, Math.max(8, window.innerWidth - ps.w - 8));
+    a.y = clamp(a.y, 8, Math.max(8, window.innerHeight - ps.h - 8));
+  };
+
+  AgentBridgeWidget.prototype._applyAnchor = function () {
+    var a = this._anchor; if (!a) return;
+    var s = this.root.style;
+    s.left = a.h === "left" ? a.x + "px" : "auto";
+    s.right = a.h === "right" ? a.x + "px" : "auto";
+    s.top = a.v === "top" ? a.y + "px" : "auto";
+    s.bottom = a.v === "bottom" ? a.y + "px" : "auto";
   };
 
   AgentBridgeWidget.prototype._restorePosition = function () {
     var raw = lsGet(LS_POS);
     if (!raw) return;
     try {
-      var p = JSON.parse(raw);
-      if (typeof p.left !== "number" || typeof p.top !== "number") return;
-      // Clamp loosely into the current viewport (it may have resized since the drag).
-      this._pinXY(
-        clamp(p.left, 0, Math.max(0, window.innerWidth - 40)),
-        clamp(p.top, 0, Math.max(0, window.innerHeight - 40))
-      );
+      var a = JSON.parse(raw);
+      if (a && (a.h === "left" || a.h === "right") && (a.v === "top" || a.v === "bottom")) {
+        this._anchor = a;
+        this._clampAnchor();   // re-fit in case the viewport changed since the drag
+        this._applyAnchor();
+      }
     } catch (e) {}
   };
 
