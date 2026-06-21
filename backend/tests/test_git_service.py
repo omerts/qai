@@ -283,6 +283,46 @@ def test_resolve_component_path_ambiguous_or_unknown(repo: Path):
     assert svc.resolve_component_path("bad name!") is None   # not a valid identifier
 
 
+def test_resolve_route_path_app_router(repo: Path):
+    _commit_file(repo, "apps/dashboards/app/auth/login/page.tsx")
+    assert GitService(repo).resolve_route_path("/auth/login") == "apps/dashboards/app/auth/login/page.tsx"
+
+
+def test_resolve_route_path_root_and_query(repo: Path):
+    _commit_file(repo, "apps/dashboards/app/page.tsx")
+    svc = GitService(repo)
+    assert svc.resolve_route_path("/") == "apps/dashboards/app/page.tsx"
+    assert svc.resolve_route_path("/?utm=x#frag") == "apps/dashboards/app/page.tsx"
+
+
+def test_resolve_route_path_ignores_route_groups(repo: Path):
+    # Route groups like (auth) don't appear in the URL but do in the path.
+    _commit_file(repo, "apps/web/app/(marketing)/pricing/page.tsx")
+    assert GitService(repo).resolve_route_path("/pricing") == "apps/web/app/(marketing)/pricing/page.tsx"
+
+
+def test_resolve_route_path_dynamic_segment(repo: Path):
+    _commit_file(repo, "app/users/[id]/page.tsx")
+    svc = GitService(repo)
+    assert svc.resolve_route_path("/users/42") == "app/users/[id]/page.tsx"
+    assert svc.resolve_route_path("/users") is None  # /users alone needs an index page
+
+
+def test_resolve_route_path_pages_router(repo: Path):
+    _commit_file(repo, "src/pages/about/index.tsx")
+    _commit_file(repo, "src/pages/contact.tsx")
+    svc = GitService(repo)
+    assert svc.resolve_route_path("/about") == "src/pages/about/index.tsx"
+    assert svc.resolve_route_path("/contact") == "src/pages/contact.tsx"
+
+
+def test_resolve_route_path_ambiguous_across_apps(repo: Path):
+    # Same route in two App-Router apps -> can't tell which from the route alone.
+    _commit_file(repo, "apps/a/app/dash/page.tsx")
+    _commit_file(repo, "apps/b/app/dash/page.tsx")
+    assert GitService(repo).resolve_route_path("/dash") is None
+
+
 def test_status_reports_changes(repo: Path):
     svc = GitService(repo)
     (repo / "new.txt").write_text("data")

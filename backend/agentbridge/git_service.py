@@ -299,6 +299,69 @@ class GitService:
             return base_hit[0]
         return None
 
+    def _route_segments_for_file(self, f: str) -> list[str] | None:
+        """The URL route a Next.js page file serves, as path segments — or None if ``f`` isn't a
+        page. App Router: ``.../app/<segs>/page.ext`` (route groups ``(x)`` and parallel routes
+        ``@x`` don't appear in the URL). Pages Router: ``.../pages/<segs>.ext`` (``index`` drops)."""
+        parts = f.split("/")
+        if "app" in parts:
+            i = len(parts) - 1 - parts[::-1].index("app")
+            tail = parts[i + 1:]
+            if tail and tail[-1].startswith("page.") and tail[-1].endswith(self._COMPONENT_EXTS):
+                return [s for s in tail[:-1] if not (s.startswith("(") and s.endswith(")")) and not s.startswith("@")]
+        if "pages" in parts:
+            i = len(parts) - 1 - parts[::-1].index("pages")
+            tail = parts[i + 1:]
+            if tail and tail[-1].endswith(self._COMPONENT_EXTS):
+                last = tail[-1].rsplit(".", 1)[0]
+                if tail[0] in ("_app", "_document") or tail[0] == "api":
+                    return None
+                return tail[:-1] + ([] if last == "index" else [last])
+        return None
+
+    @staticmethod
+    def _route_segments_match(file_segs: list[str], url_segs: list[str]) -> bool:
+        """Whether a file's route segments match a concrete URL's, honoring Next.js dynamic
+        segments: ``[x]`` matches one, ``[...x]`` one-or-more, ``[[...x]]`` zero-or-more."""
+        fi = ui = 0
+        while fi < len(file_segs):
+            seg = file_segs[fi]
+            if seg.startswith("[[...") and seg.endswith("]]"):
+                return True
+            if seg.startswith("[...") and seg.endswith("]"):
+                return ui < len(url_segs)
+            if ui >= len(url_segs):
+                return False
+            if not (seg.startswith("[") and seg.endswith("]")) and seg != url_segs[ui]:
+                return False
+            fi += 1
+            ui += 1
+        return ui == len(url_segs)
+
+    def resolve_route_path(self, route: str | None) -> str | None:
+        """Map a URL route (e.g. ``/auth/login``) to the Next.js page file that serves it
+        (e.g. ``apps/dashboards/app/auth/login/page.tsx``). This is the most reliable pointer for
+        an App-Router app and also pins down which app a monorepo route belongs to. Returns None
+        if nothing matches or the route is ambiguous across apps."""
+        if route is None:
+            return None
+        url_segs = [s for s in route.split("?", 1)[0].split("#", 1)[0].strip("/").split("/") if s]
+        files = [f for f in self._tracked_files() if f.endswith(self._COMPONENT_EXTS)]
+        if not files:
+            return None
+        matches = []
+        for f in files:
+            segs = self._route_segments_for_file(f)
+            if segs is not None and self._route_segments_match(segs, url_segs):
+                matches.append(f)
+        matches = self._prefer_source(matches)
+        if len(matches) == 1:
+            return matches[0]
+        app = [m for m in matches if m.startswith("app/") or "/app/" in m]
+        if len(app) == 1:
+            return app[0]
+        return None  # ambiguous (e.g. the same route exists in several monorepo apps)
+
     def is_path_dirty(self, path: str) -> bool:
         """Whether ``path`` (workspace-relative) has uncommitted changes (modified, staged,
         deleted, or untracked)."""

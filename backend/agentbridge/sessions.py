@@ -384,6 +384,11 @@ class Session:
                 lines.append(f"- URL: {page['url']}")
             if page.get("route"):
                 lines.append(f"- Route: {page['route']}")
+                # For Next.js, the route maps straight to a page file — the most reliable pointer,
+                # and it also tells the agent which app in a monorepo this route belongs to.
+                route_file = self.git.resolve_route_path(str(page["route"]))
+                if route_file:
+                    lines.append(f"- Route file (the page for this route): {route_file}")
             if page.get("title"):
                 lines.append(f"- Page title: {page['title']}")
             fw = page.get("framework")

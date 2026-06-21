@@ -67,6 +67,19 @@ def test_format_context_locates_file_by_component_when_no_source(tmp_path: Path)
     assert "Source file (open this first): src/StatusTabs.tsx" in out
 
 
+def test_format_context_resolves_route_to_page_file(tmp_path: Path):
+    # The Next.js route is the most reliable pointer and also pins down the app's root dir.
+    _init_repo(tmp_path)
+    (tmp_path / "apps" / "dashboards" / "app" / "auth" / "login").mkdir(parents=True)
+    (tmp_path / "apps" / "dashboards" / "app" / "auth" / "login" / "page.tsx").write_text("export default function Page(){return null}\n")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "add"], cwd=tmp_path, check=True)
+
+    session = _make_session(tmp_path, send=lambda m: _noop())
+    out = session._format_context({"page": {"route": "/auth/login"}})
+    assert "Route file (the page for this route): apps/dashboards/app/auth/login/page.tsx" in out
+
+
 def test_format_context_skips_library_components_via_chain(tmp_path: Path):
     # Ant Design case: nearest component is a library internal ("Wave") not in the repo; the
     # chain carries the user's component, which is what we resolve and report as owning.
