@@ -252,6 +252,53 @@ class GitService:
                 return None  # ambiguous at the most specific level that matched
         return None
 
+    #: Extensions a UI component is plausibly defined in.
+    _COMPONENT_EXTS = (".tsx", ".jsx", ".ts", ".js", ".mjs", ".vue", ".svelte")
+
+    @staticmethod
+    def _prefer_source(paths: list[str]) -> list[str]:
+        """Drop test/story/type-decl files when real source files are also present."""
+        if len(paths) <= 1:
+            return paths
+        real = [p for p in paths if not re.search(r"\.(test|spec|stories)\.|/__tests__/|\.d\.ts$", p)]
+        return real or paths
+
+    def resolve_component_path(self, name: str) -> str | None:
+        """Find the file that defines a UI component by name (e.g. ``StatusTabs`` ->
+        ``apps/dashboards/.../StatusTabs.tsx``). Used when the browser can't give a source path
+        (React 19 dropped ``_debugSource``) but we do know the component name. Prefers a file
+        named after the component, then a unique definition match; returns None if ambiguous."""
+        if not name or not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name):
+            return None
+        files = self._tracked_files()
+        if not files:
+            return None
+        code = [f for f in files if f.endswith(self._COMPONENT_EXTS)]
+
+        # 1) Filename matches the component name — the dominant convention.
+        by_base = self._prefer_source([f for f in code if Path(f).stem == name])
+        if len(by_base) == 1:
+            return by_base[0]
+
+        # 2) Search for a definition of that identifier. POSIX ERE (git grep -E) — no \s / \b,
+        #    so use [[:space:]] and an explicit non-word boundary. `name` is a validated
+        #    identifier, so it's safe to interpolate.
+        pattern = r"(function|class|const|let|var)[[:space:]]+%s([^A-Za-z0-9_]|$)" % name
+        try:
+            out = self.repo.git.grep("-lE", pattern, "--", *[f"*{e}" for e in self._COMPONENT_EXTS])
+            matches = self._prefer_source([ln for ln in out.splitlines() if ln])
+        except GitCommandError:
+            matches = []  # git grep exits non-zero when there are no matches
+        base_hit = [m for m in matches if Path(m).stem == name]
+        if len(base_hit) == 1:
+            return base_hit[0]
+        if len(matches) == 1:
+            return matches[0]
+        # If the filename matched several but the definition search narrowed to one, take it.
+        if by_base and len(by_base) > 1 and len(base_hit) == 1:
+            return base_hit[0]
+        return None
+
     def is_path_dirty(self, path: str) -> bool:
         """Whether ``path`` (workspace-relative) has uncommitted changes (modified, staged,
         deleted, or untracked)."""

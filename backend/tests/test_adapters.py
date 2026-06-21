@@ -54,6 +54,19 @@ def test_format_context_resolves_element_source_to_repo_path(tmp_path: Path):
     assert "Source file (open this first): src/StatusTabs.tsx:12" in out
 
 
+def test_format_context_locates_file_by_component_when_no_source(tmp_path: Path):
+    # React 19 case: no source path, only the component name -> still point at the file.
+    _init_repo(tmp_path)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "StatusTabs.tsx").write_text("export const StatusTabs = () => null\n")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "add"], cwd=tmp_path, check=True)
+
+    session = _make_session(tmp_path, send=lambda m: _noop())
+    out = session._format_context({"element": {"label": "<div>", "component": "StatusTabs"}})
+    assert "Source file (open this first): src/StatusTabs.tsx" in out
+
+
 async def test_stub_adapters_unavailable_and_raise():
     assert AiderAdapter.is_available() is False
     assert CopilotAdapter.is_available() is False

@@ -406,17 +406,24 @@ class Session:
                 lines.append(f"- CSS selector: {el['selector']}")
             if el.get("text"):
                 lines.append(f"- Text content: {el['text']}")
-            src = el.get("source")
-            if isinstance(src, dict) and src.get("file"):
-                suffix = f":{src['line']}" if src.get("line") else ""
-                # The browser reports a build-time/absolute path that usually doesn't exist under
-                # the agent's workspace. Resolve it to a real repo-relative file so the agent
-                # opens it directly instead of hunting for it.
-                resolved = self.git.resolve_tracked_path(str(src["file"]))
-                if resolved:
-                    lines.append(f"- Source file (open this first): {resolved}{suffix}")
-                else:
-                    lines.append(f"- Source hint (from the browser; may need locating): {src['file']}{suffix}")
+            # Point the agent straight at the source file. Prefer the browser's source hint (it
+            # carries a line number); when that's absent — e.g. React 19, which dropped
+            # _debugSource — fall back to locating the file by the owning component's name.
+            src = el.get("source") if isinstance(el.get("source"), dict) else {}
+            raw_file = src.get("file")
+            line_suffix = f":{src.get('line')}" if src.get("line") else ""
+            resolved = self.git.resolve_tracked_path(str(raw_file)) if raw_file else None
+            comp_file = (
+                self.git.resolve_component_path(str(el["component"]))
+                if not resolved and el.get("component")
+                else None
+            )
+            if resolved:
+                lines.append(f"- Source file (open this first): {resolved}{line_suffix}")
+            elif comp_file:
+                lines.append(f"- Source file (open this first): {comp_file}")
+            elif raw_file:
+                lines.append(f"- Source hint (from the browser; may need locating): {raw_file}{line_suffix}")
         return "\n".join(lines).strip()
 
 

@@ -252,6 +252,37 @@ def test_resolve_tracked_path_unknown_returns_none(repo: Path):
     assert GitService(repo).resolve_tracked_path("/x/y/DoesNotExist.tsx") is None
 
 
+def test_resolve_component_path_by_filename(repo: Path):
+    # React 19 gives no source path, only the component name -> locate the file by name.
+    _commit_file(repo, "apps/dashboards/components/StatusTabs.tsx")
+    assert GitService(repo).resolve_component_path("StatusTabs") == "apps/dashboards/components/StatusTabs.tsx"
+
+
+def test_resolve_component_path_by_definition_search(repo: Path):
+    # File isn't named after the component; fall back to searching for its definition.
+    target = repo / "src" / "ui.tsx"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("export function FancyButton() { return null }\n")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "ui"], cwd=repo, check=True)
+    assert GitService(repo).resolve_component_path("FancyButton") == "src/ui.tsx"
+
+
+def test_resolve_component_path_prefers_real_over_test(repo: Path):
+    _commit_file(repo, "src/Card.tsx")
+    _commit_file(repo, "src/Card.test.tsx")
+    assert GitService(repo).resolve_component_path("Card") == "src/Card.tsx"
+
+
+def test_resolve_component_path_ambiguous_or_unknown(repo: Path):
+    _commit_file(repo, "a/Widget.tsx")
+    _commit_file(repo, "b/Widget.tsx")
+    svc = GitService(repo)
+    assert svc.resolve_component_path("Widget") is None      # two files named Widget — don't guess
+    assert svc.resolve_component_path("Nonexistent") is None
+    assert svc.resolve_component_path("bad name!") is None   # not a valid identifier
+
+
 def test_status_reports_changes(repo: Path):
     svc = GitService(repo)
     (repo / "new.txt").write_text("data")
