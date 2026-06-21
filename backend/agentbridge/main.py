@@ -99,12 +99,25 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         await hub.close()
 
 
+class _NoCacheStatic(StaticFiles):
+    """StaticFiles that forces revalidation. The widget is iterated on constantly and embedded
+    via a fixed <script> URL, so without this browsers serve a stale bundle after a rebuild
+    (StaticFiles sets ETag/Last-Modified but no Cache-Control, so heuristic caching kicks in).
+    ``no-cache`` means "always revalidate" — a cheap 304 when unchanged, fresh bytes after a
+    rebuild — so a plain page refresh always loads the current widget."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 # Serve the built widget bundle (if present) at /widget for easy embedding/testing.
 _WIDGET_DIST = Path(__file__).resolve().parents[2] / "widget" / "dist"
 _WIDGET_SRC = Path(__file__).resolve().parents[2] / "widget" / "src"
 for mount, directory in (("/widget", _WIDGET_DIST), ("/widget-src", _WIDGET_SRC)):
     if directory.is_dir():
-        app.mount(mount, StaticFiles(directory=str(directory)), name=mount.strip("/"))
+        app.mount(mount, _NoCacheStatic(directory=str(directory)), name=mount.strip("/"))
 
 
 def run() -> None:
