@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -115,9 +116,20 @@ class _NoCacheStatic(StaticFiles):
 # Serve the built widget bundle (if present) at /widget for easy embedding/testing.
 _WIDGET_DIST = Path(__file__).resolve().parents[2] / "widget" / "dist"
 _WIDGET_SRC = Path(__file__).resolve().parents[2] / "widget" / "src"
+
+_log = logging.getLogger("agentbridge")
 for mount, directory in (("/widget", _WIDGET_DIST), ("/widget-src", _WIDGET_SRC)):
+    bundle = directory / "agentbridge-widget.js"
     if directory.is_dir():
         app.mount(mount, _NoCacheStatic(directory=str(directory)), name=mount.strip("/"))
+        # Make a 404 diagnosable: log that the mount exists and whether the bundle is there.
+        _log.info("Serving %s from %s (bundle present: %s)", mount, directory, bundle.is_file())
+    elif mount == "/widget":
+        _log.warning(
+            "Widget NOT served: %s does not exist, so GET %s/agentbridge-widget.js will 404. "
+            "Build it with `cd widget && npm run build` (or rebuild the Docker image so it COPYs "
+            "widget/dist).", directory, mount,
+        )
 
 
 def run() -> None:
