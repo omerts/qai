@@ -18,7 +18,7 @@ from typing import Awaitable, Callable
 from . import protocol as P
 from .agents.base import AgentEvent, SessionContext
 from .agents.registry import create_adapter, get_adapter_class, list_agent_info
-from .git_service import GitError, GitService
+from .git_service import GitError, GitService, PullRequest
 from .store import ChatRecord, ChatStore
 
 Send = Callable[[P.ServerMessage], Awaitable[None]]
@@ -165,7 +165,6 @@ class Session:
         if preamble:
             text = f"{preamble}\n\n---\n\n{text}"
 
-        self._turn_active = True
         self._turn_text = []
         await self.send(P.Status(chat_id=self.chat_id, state="working"))
 
@@ -175,7 +174,11 @@ class Session:
         # as edit-tool events).
         before = self._dirty_paths()
 
-        # Serialize across chats: only one agent turn touches the workspace at a time.
+        # Mark active only once we're committed to running the turn, and always clear it in the
+        # finally — otherwise an exception before/around the loop would wedge the chat as
+        # perpetually "working" and block Stop. Serialize across chats: only one agent turn
+        # touches the workspace at a time.
+        self._turn_active = True
         async with self.turn_lock:
             try:
                 async for event in self.adapter.send(text):  # type: ignore[union-attr]
@@ -238,17 +241,10 @@ class Session:
         title, body = self._pr_meta(msg.title, msg.body, touched)
         branch = self.record.target_branch or self.git.suggest_branch_name(title)
         try:
-            path = self.git.ensure_worktree(branch)
-            # Scope the migration to the agent's files: this both moves them onto the branch
-            # worktree and removes them from the workspace, leaving unrelated changes in place
-            # (so we don't need — and must not do — a destructive reset of the workspace).
-            self.git.migrate_uncommitted_to(path, paths=touched)
-            wt_git = GitService(path)
-            wt_git.commit_all(title)
-            wt_git.push(branch, token=self.github_token)
-            pr = wt_git.create_pull_request(
-                title=title, head=branch, body=body, token=self.github_token
-            )
+            # The whole sequence is blocking work — git subprocesses plus a synchronous GitHub
+            # HTTP call — so run it off the event loop; otherwise it would stall every other
+            # WebSocket connection (and turn) for the duration of the push/PR round-trip.
+            path, pr = await asyncio.to_thread(self._open_pr_blocking, branch, title, body, touched)
         except GitError as exc:
             await self.send(P.ErrorMessage(message=str(exc), chat_id=self.chat_id))
             return
@@ -263,6 +259,20 @@ class Session:
         await self.send(P.BranchCreated(chat_id=self.chat_id, branch=branch, worktree_path=str(path)))
         await self.send(P.PRCreated(chat_id=self.chat_id, url=pr.url, number=pr.number))
         await self._send_file_changes()
+
+    def _open_pr_blocking(
+        self, branch: str, title: str, body: str, touched: list[str]
+    ) -> tuple[Path, PullRequest]:
+        """Create the branch worktree, move the agent's files onto it, commit, push, and open the
+        PR. Pure blocking work (git subprocesses + a synchronous GitHub call), so it runs in a
+        worker thread via ``asyncio.to_thread`` rather than on the event loop."""
+        path = self.git.ensure_worktree(branch)
+        self.git.migrate_uncommitted_to(path, paths=touched)
+        wt_git = GitService(path)
+        wt_git.commit_all(title)
+        wt_git.push(branch, token=self.github_token)
+        pr = wt_git.create_pull_request(title=title, head=branch, body=body, token=self.github_token)
+        return path, pr
 
     # ------------------------------------------------------------------ #
     # Helpers

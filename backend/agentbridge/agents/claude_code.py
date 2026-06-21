@@ -242,14 +242,21 @@ class ClaudeCodeAdapter(AgentAdapter):
             return False
         self._interrupted = True
         # Also unblock any pending Allow/Deny prompt so the turn isn't stuck awaiting an answer.
-        for future in list(self._pending.values()):
-            if not future.done():
-                future.set_result("deny")
+        self._cancel_pending()
         try:
             await self._client.interrupt()
             return True
         except Exception:  # noqa: BLE001
             return False
+
+    def _cancel_pending(self) -> None:
+        """Resolve every outstanding Allow/Deny prompt as a denial and forget it, so any turn
+        blocked in :meth:`_ask` can unwind. Used by both ``interrupt`` and ``stop`` so they stay
+        consistent and never leave dead request ids in ``_pending``."""
+        for future in self._pending.values():
+            if not future.done():
+                future.set_result("deny")
+        self._pending.clear()
 
     # ------------------------------------------------------------------ #
     # Interactive permission callback
@@ -282,7 +289,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         """Surface a prompt to the frontend and block until :meth:`resolve_prompt` answers."""
         assert self._queue is not None, "_ask called outside of a turn"
         request_id = uuid.uuid4().hex[:12]
-        future: asyncio.Future = asyncio.get_event_loop().create_future()
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
         await self._queue.put(AgentEvent.prompt(request_id, prompt, options=options))
         try:
@@ -388,10 +395,7 @@ class ClaudeCodeAdapter(AgentAdapter):
 
     async def stop(self) -> None:
         # Unblock any outstanding prompt so the turn task can finish.
-        for future in list(self._pending.values()):
-            if not future.done():
-                future.set_result("deny")
-        self._pending.clear()
+        self._cancel_pending()
         if self._client is not None:
             try:
                 await self._client.disconnect()

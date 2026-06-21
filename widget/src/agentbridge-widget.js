@@ -60,7 +60,6 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   function AgentBridgeWidget(opts) {
     this.server = opts.server;
     this.position = opts.position || "bottom-right";
-    this.scriptSrc = opts.scriptSrc || null;
     this.ws = null;
     this.connected = false;
     this.agents = [];
@@ -244,8 +243,8 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   // trailing click so a draggable-and-clickable element (the bubble) doesn't also fire its click.
   AgentBridgeWidget.prototype._enableDrag = function (handle, opts) {
     opts = opts || {};
-    var self = this, dragging = false, moved = false, sx = 0, sy = 0, startLeft = 0, startTop = 0;
-    var THRESHOLD = 4;   // px of movement before a press counts as a drag (vs a click)
+    var self = this;
+    this._bindDragGlobals();   // attach the document move/up listeners exactly once
 
     handle.addEventListener("mousedown", function (e) {
       if (e.button !== 0) return;
@@ -253,29 +252,41 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       if (!opts.wholeHandle && e.target.closest("button, select, input, textarea, a")) return;
       var r = self.root.getBoundingClientRect();
       self._pinXY(r.left, r.top);
-      dragging = true; moved = false;
-      sx = e.clientX; sy = e.clientY; startLeft = r.left; startTop = r.top;
+      // Shared per-press state read by the single document-level move/up handlers below.
+      self._drag = { opts: opts, moved: false, sx: e.clientX, sy: e.clientY, startLeft: r.left, startTop: r.top };
       document.body.style.userSelect = "none";
       e.preventDefault();
     });
+  };
+
+  // Document-level move/up listeners are bound once for the whole widget (not per draggable
+  // handle) so additional handles don't accumulate duplicate listeners. They act on the active
+  // press recorded in this._drag, which a handle's mousedown sets.
+  AgentBridgeWidget.prototype._bindDragGlobals = function () {
+    if (this._dragGlobalsBound) return;
+    this._dragGlobalsBound = true;
+    var self = this;
+    var THRESHOLD = 4;   // px of movement before a press counts as a drag (vs a click)
 
     document.addEventListener("mousemove", function (e) {
-      if (!dragging) return;
-      var dx = e.clientX - sx, dy = e.clientY - sy;
-      if (!moved && (Math.abs(dx) > THRESHOLD || Math.abs(dy) > THRESHOLD)) moved = true;
+      var d = self._drag;
+      if (!d) return;
+      var dx = e.clientX - d.sx, dy = e.clientY - d.sy;
+      if (!d.moved && (Math.abs(dx) > THRESHOLD || Math.abs(dy) > THRESHOLD)) d.moved = true;
       var r = self.root.getBoundingClientRect();
       self._pinXY(
-        clamp(startLeft + dx, 0, window.innerWidth - r.width),
-        clamp(startTop + dy, 0, window.innerHeight - r.height)
+        clamp(d.startLeft + dx, 0, window.innerWidth - r.width),
+        clamp(d.startTop + dy, 0, window.innerHeight - r.height)
       );
     }, true);
 
     document.addEventListener("mouseup", function () {
-      if (!dragging) return;
-      dragging = false;
+      var d = self._drag;
+      if (!d) return;
+      self._drag = null;
       document.body.style.userSelect = "";
-      if (!moved) return;   // a click, not a drag — leave position and any click handler alone
-      if (opts.suppressClick) self._dragJustHappened = true;
+      if (!d.moved) return;   // a click, not a drag — leave position and any click handler alone
+      if (d.opts.suppressClick) self._dragJustHappened = true;
       // Convert the dragged spot into a corner anchor so the panel opens inward (stays visible).
       self._setAnchorFromRect(self.root.getBoundingClientRect());
     }, true);
@@ -1165,16 +1176,6 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.input.disabled = !on;
   };
 
-  // Scrolling is handled by assistant-ui's <ThreadViewport> auto-scroll; kept as a no-op
-  // so any stray caller is harmless.
-  AgentBridgeWidget.prototype._scroll = function () {};
-
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, function (c) {
-      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
-    });
-  }
-
   // ---- Public API + auto-init ------------------------------------------ //
 
   var AgentBridge = {
@@ -1193,7 +1194,6 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     AgentBridge.init({
       server: current.dataset.server,
       position: current.dataset.position || "bottom-right",
-      scriptSrc: current.src,
     });
   }
 

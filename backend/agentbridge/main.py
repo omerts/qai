@@ -24,6 +24,8 @@ from . import __version__, protocol as P
 from .config import get_settings
 from .sessions import ChatHub
 
+_log = logging.getLogger("agentbridge")
+
 app = FastAPI(title="AgentBridge", version=__version__)
 
 # The widget is embedded in arbitrary dev frontends, so allow cross-origin WS/HTTP.
@@ -76,6 +78,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         try:
             await hub.handle(msg)
         except Exception as exc:  # noqa: BLE001 — never let one handler kill the connection
+            _log.exception("Handler error for %s", getattr(msg, "type", "?"))
             await send(P.ErrorMessage(message=f"Handler error: {exc}"))
 
     try:
@@ -97,6 +100,10 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     finally:
         for task in tasks:
             task.cancel()
+        # Let the cancelled handlers actually unwind before we tear the adapter down, so adapter
+        # cleanup doesn't race a still-running turn.
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         await hub.close()
 
 
@@ -117,7 +124,6 @@ class _NoCacheStatic(StaticFiles):
 _WIDGET_DIST = Path(__file__).resolve().parents[2] / "widget" / "dist"
 _WIDGET_SRC = Path(__file__).resolve().parents[2] / "widget" / "src"
 
-_log = logging.getLogger("agentbridge")
 for mount, directory in (("/widget", _WIDGET_DIST), ("/widget-src", _WIDGET_SRC)):
     bundle = directory / "agentbridge-widget.js"
     if directory.is_dir():

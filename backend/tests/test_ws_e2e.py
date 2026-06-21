@@ -99,7 +99,6 @@ def client(tmp_path: Path, monkeypatch):
     # Persist chat history to a temp dir, not the real ~/.agentbridge.
     monkeypatch.setenv("AGENTBRIDGE_STATE_DIR", str(tmp_path.parent / "agentbridge-state"))
     config.get_settings.cache_clear()
-    config.github_token.cache_clear()
     monkeypatch.setattr(config.Settings, "github_token", property(lambda self: "fake-token"))
     # Register the fake adapters.
     monkeypatch.setitem(registry._ADAPTERS, "fake", FakeAdapter)

@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+
+_log = logging.getLogger("agentbridge")
 
 
 def _now() -> str:
@@ -81,7 +84,10 @@ class ChatStore:
             return None
         try:
             data = json.loads(path.read_text())
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as exc:
+            # A corrupt/unreadable chat file shouldn't crash the listing, but log it so the loss
+            # is diagnosable rather than the chat just silently vanishing.
+            _log.warning("Skipping unreadable chat file %s: %s", path, exc)
             return None
         # Tolerate older/newer files by filtering to known fields.
         known = ChatRecord.__dataclass_fields__  # type: ignore[attr-defined]

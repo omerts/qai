@@ -20,11 +20,14 @@ def _default_workspace() -> Path:
     return Path(raw).expanduser().resolve() if raw else Path.cwd().resolve()
 
 
-@lru_cache(maxsize=1)
 def github_token() -> str | None:
     """Discover a GitHub token from the environment, then fall back to the gh CLI.
 
     Order: GITHUB_TOKEN -> GH_TOKEN -> `gh auth token`. Returns None if none found.
+
+    Deliberately uncached: it's only consulted on PR creation (and the health check), so a fresh
+    lookup is cheap, and caching would pin a stale token — e.g. one that appears after a `gh auth
+    login` mid-session would never be picked up, and an expired one would linger as "valid".
     """
     for var in ("GITHUB_TOKEN", "GH_TOKEN"):
         if token := os.environ.get(var):

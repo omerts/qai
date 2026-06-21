@@ -128,6 +128,15 @@ class CursorAdapter(AgentAdapter):
                 return
             yield AgentEvent.done()
         finally:
+            # On the normal path stderr_task is already awaited above; if we're unwinding early
+            # (consumer closed the generator, or readline raised) it's still running — cancel it
+            # so the drain coroutine doesn't outlive the turn.
+            if not stderr_task.done():
+                stderr_task.cancel()
+                try:
+                    await stderr_task
+                except asyncio.CancelledError:
+                    pass
             self._proc = None
 
     async def interrupt(self) -> bool:
@@ -210,4 +219,13 @@ class CursorAdapter(AgentAdapter):
         return []
 
     async def stop(self) -> None:
+        # Terminate a still-running process so tearing down the session (e.g. on disconnect)
+        # never orphans a cursor-agent subprocess.
+        proc = self._proc
+        if proc is not None and proc.returncode is None:
+            self._interrupted = True
+            try:
+                proc.terminate()
+            except ProcessLookupError:
+                pass
         self._chat_id = None
