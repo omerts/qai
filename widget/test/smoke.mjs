@@ -50,6 +50,8 @@ assert.ok(AgentBridge.version && AgentBridge.version !== "dev", "widget version 
 const widget = AgentBridge.init({ server: "ws://localhost:9/ws" });
 assert.ok(widget && widget.shadow, "widget did not mount a shadow root");
 assert.equal(widget.hostEl.getAttribute("data-ab-version"), AgentBridge.version, "host data-ab-version mismatch");
+const verEl = widget.shadow.querySelector(".ab-ver");
+assert.ok(verEl && verEl.textContent === AgentBridge.version, "version not shown in header: " + (verEl && verEl.textContent));
 
 const tick = () => new Promise((r) => setTimeout(r, 60));
 

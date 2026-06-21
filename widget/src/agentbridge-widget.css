@@ -77,6 +77,12 @@
 .ab-header .ab-title {
   font-weight: 600; font-size: 14px; flex: 1;
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: flex; align-items: baseline; gap: 6px;
+}
+.ab-header .ab-ver {
+  font-weight: 400; font-size: 10px; opacity: 0.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  flex: none; letter-spacing: 0;
 }
 
 /* New-chat button — a labeled accent pill so the primary action is obvious */

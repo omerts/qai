@@ -128,10 +128,14 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.newBtn.addEventListener("click", function () { self._newChat(); });
     var closeBtn = h("button", { class: "ab-iconbtn", title: "Close", text: "✕" });
     closeBtn.addEventListener("click", function () { self._toggle(false); });
+    var titleWrap = h("span", { class: "ab-title", title: "AgentBridge widget " + VERSION }, [
+      h("span", { class: "ab-title-name", text: "Coding Agent" }),
+      h("span", { class: "ab-ver", text: VERSION }),
+    ]);
     var header = h("div", { class: "ab-header" }, [
       this.menuBtn,
       this.statusDot,
-      h("span", { class: "ab-title", text: "Coding Agent" }),
+      titleWrap,
       this.newBtn,
       closeBtn,
     ]);
