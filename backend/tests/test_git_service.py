@@ -283,6 +283,21 @@ def test_resolve_component_path_ambiguous_or_unknown(repo: Path):
     assert svc.resolve_component_path("bad name!") is None   # not a valid identifier
 
 
+def test_resolve_component_in_picks_user_component_deep_in_chain(repo: Path):
+    # Real Ant Design + Next chain: the user's page component (LoginPage) is buried ~14 levels
+    # behind library wrappers, defined in page.tsx (so found by definition search, not filename).
+    target = repo / "apps" / "dashboards" / "app" / "auth" / "login" / "page.tsx"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("export default function LoginPage() { return null }\n")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "login"], cwd=repo, check=True)
+
+    chain = ["Wave", "Button", "FormItemInputContext", "Col", "Form", "Card", "LoginPage",
+             "ClientPageRoot", "OuterLayoutRouter"]
+    got = GitService(repo).resolve_component_in(chain)
+    assert got == ("LoginPage", "apps/dashboards/app/auth/login/page.tsx")
+
+
 def test_resolve_route_path_app_router(repo: Path):
     _commit_file(repo, "apps/dashboards/app/auth/login/page.tsx")
     assert GitService(repo).resolve_route_path("/auth/login") == "apps/dashboards/app/auth/login/page.tsx"

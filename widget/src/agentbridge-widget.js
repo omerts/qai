@@ -743,7 +743,9 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
         if (nm && nm[0] === nm[0].toUpperCase() && !seen[nm]) { seen[nm] = 1; names.push(nm); }
       }
     } catch (e) {}
-    return names.slice(0, 12);
+    // Keep a generous slice: the user's component can sit deep behind library wrappers (an Ant
+    // Design button buries LoginPage ~15 levels up), and the backend filters out the noise.
+    return names.slice(0, 40);
   };
 
   AgentBridgeWidget.prototype._cssPath = function (el) {

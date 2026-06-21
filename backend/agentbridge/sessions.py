@@ -417,17 +417,11 @@ class Session:
             resolved = self.git.resolve_tracked_path(str(raw_file)) if raw_file else None
 
             chain = el.get("componentChain") if isinstance(el.get("componentChain"), list) else []
-            candidates: list[str] = []
-            for c in [el.get("component"), *chain]:
-                if isinstance(c, str) and c and c not in candidates:
-                    candidates.append(c)
             comp_file = comp_name = None
             if not resolved:
-                for c in candidates:
-                    found = self.git.resolve_component_path(c)
-                    if found:
-                        comp_file, comp_name = found, c
-                        break
+                found = self.git.resolve_component_in([el.get("component"), *chain])
+                if found:
+                    comp_name, comp_file = found
 
             # Prefer the user component we actually located; else fall back to the nearest name.
             owning = comp_name or el.get("component")

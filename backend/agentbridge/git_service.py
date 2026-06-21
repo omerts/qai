@@ -263,41 +263,57 @@ class GitService:
         real = [p for p in paths if not re.search(r"\.(test|spec|stories)\.|/__tests__/|\.d\.ts$", p)]
         return real or paths
 
-    def resolve_component_path(self, name: str) -> str | None:
-        """Find the file that defines a UI component by name (e.g. ``StatusTabs`` ->
-        ``apps/dashboards/.../StatusTabs.tsx``). Used when the browser can't give a source path
-        (React 19 dropped ``_debugSource``) but we do know the component name. Prefers a file
-        named after the component, then a unique definition match; returns None if ambiguous."""
-        if not name or not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name):
+    def resolve_component_in(self, names: list[str]) -> tuple[str, str] | None:
+        """Given component names ordered innermost-first (a React fiber chain), return
+        ``(name, file)`` for the first that maps to a single tracked file — i.e. the user's
+        component nearest the selected element, skipping library wrappers (Ant Design's
+        ``Wave``/``Button``, Next.js internals, …) that aren't in the repo. Uses ONE ``git grep``
+        for the whole chain, not one per name. Returns None if none resolve unambiguously."""
+        cands = list(dict.fromkeys(
+            n for n in names if isinstance(n, str) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", n)
+        ))
+        if not cands:
             return None
-        files = self._tracked_files()
-        if not files:
+        code = [f for f in self._tracked_files() if f.endswith(self._COMPONENT_EXTS)]
+        if not code:
             return None
-        code = [f for f in files if f.endswith(self._COMPONENT_EXTS)]
 
-        # 1) Filename matches the component name — the dominant convention.
-        by_base = self._prefer_source([f for f in code if Path(f).stem == name])
-        if len(by_base) == 1:
-            return by_base[0]
+        # 1) A file named after the component — the strongest, cheapest signal (in-memory).
+        by_stem: dict[str, list[str]] = {}
+        for f in code:
+            by_stem.setdefault(Path(f).stem, []).append(f)
+        for n in cands:
+            hit = self._prefer_source(by_stem.get(n, []))
+            if len(hit) == 1:
+                return (n, hit[0])
 
-        # 2) Search for a definition of that identifier. POSIX ERE (git grep -E) — no \s / \b,
-        #    so use [[:space:]] and an explicit non-word boundary. `name` is a validated
-        #    identifier, so it's safe to interpolate.
-        pattern = r"(function|class|const|let|var)[[:space:]]+%s([^A-Za-z0-9_]|$)" % name
+        # 2) One batched definition search across all names. POSIX ERE (git grep -E): no \s / \b,
+        #    so use [[:space:]] and an explicit non-word boundary. Names are validated identifiers,
+        #    so they're safe to interpolate into the alternation.
+        pattern = r"(function|class|const|let|var)[[:space:]]+(%s)([^A-Za-z0-9_]|$)" % "|".join(cands)
         try:
-            out = self.repo.git.grep("-lE", pattern, "--", *[f"*{e}" for e in self._COMPONENT_EXTS])
-            matches = self._prefer_source([ln for ln in out.splitlines() if ln])
+            out = self.repo.git.grep("-nE", pattern, "--", *[f"*{e}" for e in self._COMPONENT_EXTS])
         except GitCommandError:
-            matches = []  # git grep exits non-zero when there are no matches
-        base_hit = [m for m in matches if Path(m).stem == name]
-        if len(base_hit) == 1:
-            return base_hit[0]
-        if len(matches) == 1:
-            return matches[0]
-        # If the filename matched several but the definition search narrowed to one, take it.
-        if by_base and len(by_base) > 1 and len(base_hit) == 1:
-            return base_hit[0]
+            return None  # git grep exits non-zero when there are no matches
+        line_re = re.compile(
+            r"^(?P<file>.+?):\d+:.*\b(?:function|class|const|let|var)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"
+        )
+        defs: dict[str, set[str]] = {}
+        wanted = set(cands)
+        for line in out.splitlines():
+            m = line_re.match(line)
+            if m and m.group("name") in wanted:
+                defs.setdefault(m.group("name"), set()).add(m.group("file"))
+        for n in cands:
+            hit = self._prefer_source(sorted(defs.get(n, ())))
+            if len(hit) == 1:
+                return (n, hit[0])
         return None
+
+    def resolve_component_path(self, name: str) -> str | None:
+        """Convenience single-name wrapper around :meth:`resolve_component_in`."""
+        found = self.resolve_component_in([name])
+        return found[1] if found else None
 
     def _route_segments_for_file(self, f: str) -> list[str] | None:
         """The URL route a Next.js page file serves, as path segments — or None if ``f`` isn't a
