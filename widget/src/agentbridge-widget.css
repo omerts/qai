@@ -74,6 +74,9 @@
   background: var(--ab-surface);
   border-bottom: 1px solid var(--ab-border);
 }
+/* The header doubles as a drag handle; its buttons keep the normal pointer cursor. */
+.ab-header.ab-drag { cursor: move; user-select: none; }
+.ab-header.ab-drag button, .ab-header.ab-drag select { cursor: pointer; }
 .ab-header .ab-title {
   font-weight: 600; font-size: 14px; flex: 1;
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

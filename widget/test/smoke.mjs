@@ -244,7 +244,17 @@ async function main() {
   widget._applyTheme();
   assert.equal(widget.root.style.getPropertyValue("--ab-accent"), "", "accent not reset to default");
 
-  console.log("OK — widget mounts, streams, renders markdown, resets, and themes per agent.");
+  // --- Draggable: dragging the header pins the widget at an explicit left/top ---
+  const headerEl = widget.shadow.querySelector(".ab-header.ab-drag");
+  assert.ok(headerEl, "header drag handle missing");
+  const md = new window.MouseEvent("mousedown", { bubbles: true, button: 0, clientX: 100, clientY: 100 });
+  headerEl.dispatchEvent(md);
+  window.document.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientX: 160, clientY: 140 }));
+  window.document.dispatchEvent(new window.MouseEvent("mouseup", { bubbles: true }));
+  assert.ok(widget.root.style.left && widget.root.style.top, "drag did not pin left/top");
+  assert.equal(widget.root.style.right, "auto", "drag should drop the corner anchor");
+
+  console.log("OK — widget mounts, streams, renders markdown, resets, drags, and themes per agent.");
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error("FAIL:", e.message); process.exit(1); });

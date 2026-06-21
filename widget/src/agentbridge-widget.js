@@ -38,9 +38,11 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   var LS_AGENT = "agentbridge:agent";
   var LS_CHAT = "agentbridge:activeChat";
   var LS_AUTO = "agentbridge:autoApprove";
+  var LS_POS = "agentbridge:pos";   // dragged {left, top} of the widget
 
   function lsGet(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } }
   function lsSet(k, v) { try { window.localStorage.setItem(k, v); } catch (e) {} }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(v, hi)); }
 
   function h(tag, attrs, children) {
     var el = document.createElement(tag);
@@ -132,13 +134,14 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       h("span", { class: "ab-title-name", text: "Coding Agent" }),
       h("span", { class: "ab-ver", text: VERSION }),
     ]);
-    var header = h("div", { class: "ab-header" }, [
+    var header = h("div", { class: "ab-header ab-drag" }, [
       this.menuBtn,
       this.statusDot,
       titleWrap,
       this.newBtn,
       closeBtn,
     ]);
+    this._enableDrag(header);   // drag the panel around by its header
 
     // Controls: agent picker + PR + inspect
     this.agentSelect = h("select", { class: "ab-select", title: "Default agent for new chats" });
@@ -213,6 +216,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.root.appendChild(this.bubble);
     this.root.appendChild(panel);
     this.shadow.appendChild(this.root);
+    this._restorePosition();   // re-apply a previously dragged position
 
     this._setConnState("connecting");
     this._setChatActive(false);
@@ -222,6 +226,61 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.root.classList.toggle("open", open);
     if (open) this.input.focus();
     else if (this._inspecting) this._stopInspect();
+  };
+
+  // ---- Dragging --------------------------------------------------------- //
+
+  // Drag the whole widget (panel + bubble share this.root) by a handle, switching from the
+  // CSS corner anchor to explicit left/top. Clicks on header controls are left alone, and the
+  // position is clamped to the viewport and remembered across reloads.
+  AgentBridgeWidget.prototype._enableDrag = function (handle) {
+    var self = this, dragging = false, sx = 0, sy = 0, startLeft = 0, startTop = 0;
+
+    handle.addEventListener("mousedown", function (e) {
+      if (e.button !== 0) return;
+      if (e.target.closest("button, select, input, textarea, a")) return; // let controls work
+      var r = self.root.getBoundingClientRect();
+      self._pinXY(r.left, r.top);
+      dragging = true; sx = e.clientX; sy = e.clientY; startLeft = r.left; startTop = r.top;
+      document.body.style.userSelect = "none";
+      e.preventDefault();
+    });
+
+    document.addEventListener("mousemove", function (e) {
+      if (!dragging) return;
+      var r = self.root.getBoundingClientRect();
+      var left = clamp(startLeft + (e.clientX - sx), 0, window.innerWidth - r.width);
+      var top = clamp(startTop + (e.clientY - sy), 0, window.innerHeight - r.height);
+      self._pinXY(left, top);
+    }, true);
+
+    document.addEventListener("mouseup", function () {
+      if (!dragging) return;
+      dragging = false;
+      document.body.style.userSelect = "";
+      var r = self.root.getBoundingClientRect();
+      lsSet(LS_POS, JSON.stringify({ left: Math.round(r.left), top: Math.round(r.top) }));
+    }, true);
+  };
+
+  // Anchor the widget at an absolute viewport position (overriding the corner CSS).
+  AgentBridgeWidget.prototype._pinXY = function (left, top) {
+    var s = this.root.style;
+    s.left = left + "px"; s.top = top + "px"; s.right = "auto"; s.bottom = "auto";
+  };
+
+  AgentBridgeWidget.prototype._restorePosition = function () {
+    var raw = lsGet(LS_POS);
+    if (!raw) return;
+    try {
+      var p = JSON.parse(raw);
+      if (typeof p.left !== "number" || typeof p.top !== "number") return;
+      // Clamp loosely into the current viewport (it may have resized since the drag).
+      this._pinXY(
+        clamp(p.left, 0, Math.max(0, window.innerWidth - 40)),
+        clamp(p.top, 0, Math.max(0, window.innerHeight - 40))
+      );
+    } catch (e) {}
   };
 
   AgentBridgeWidget.prototype._toggleDrawer = function (force) {
