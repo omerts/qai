@@ -44,9 +44,12 @@ try {
 
 const AgentBridge = window.AgentBridge;
 assert.ok(AgentBridge && typeof AgentBridge.init === "function", "AgentBridge.init missing");
+// A real build stamp (not the unbundled "dev" fallback) so we can verify deployed builds.
+assert.ok(AgentBridge.version && AgentBridge.version !== "dev", "widget version not stamped: " + AgentBridge.version);
 
 const widget = AgentBridge.init({ server: "ws://localhost:9/ws" });
 assert.ok(widget && widget.shadow, "widget did not mount a shadow root");
+assert.equal(widget.hostEl.getAttribute("data-ab-version"), AgentBridge.version, "host data-ab-version mismatch");
 
 const tick = () => new Promise((r) => setTimeout(r, 60));
 

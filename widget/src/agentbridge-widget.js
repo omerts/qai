@@ -20,6 +20,11 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
 (function () {
   "use strict";
 
+  // Build-time version stamp (git sha + package version), injected by build.mjs via esbuild
+  // `define`. Falls back to "dev" when run unbundled. Exposed below so you can confirm exactly
+  // which widget build a page is running (console log, window global, and a data attribute).
+  var VERSION = (typeof __AB_WIDGET_VERSION__ !== "undefined") ? __AB_WIDGET_VERSION__ : "dev";
+
   var ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
   // Crosshair "select element" icon (devtools-style inspector).
   var INSPECT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="4"/></svg>';
@@ -80,8 +85,10 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   AgentBridgeWidget.prototype._init = function () {
     var host = h("div");
     host.style.all = "initial";
+    host.setAttribute("data-ab-version", VERSION);   // inspect the DOM to see the running build
     document.body.appendChild(host);
     this.hostEl = host;          // used to exclude our own UI while inspecting
+    try { console.log("[AgentBridge] widget " + VERSION); } catch (e) {}
     this.shadow = host.attachShadow({ mode: "open" });
 
     var style = document.createElement("style");
@@ -1049,6 +1056,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   // ---- Public API + auto-init ------------------------------------------ //
 
   var AgentBridge = {
+    version: VERSION,   // read window.AgentBridge.version in the console to check the build
     _instance: null,
     init: function (opts) {
       opts = opts || {};
