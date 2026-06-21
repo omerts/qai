@@ -1,36 +1,78 @@
 # AgentBridge
 
-Talk to a coding agent from inside your app's frontend and have it make real changes to
-the dev environment the app is running in — without leaving the browser.
+**Talk to a coding agent from inside your app's frontend and have it make real changes to the dev environment the app is running in — without leaving the browser.**
 
-AgentBridge has three parts:
-
-1. **Backend** (`backend/`) — a FastAPI server that orchestrates coding agents
-   (Claude Code, Cursor, Aider, Copilot) against your local repo and handles git/PR.
-2. **Widget** (`widget/`) — a Shadow-DOM chat bubble you drop into any React/Angular/Vue
-   (or plain HTML) frontend with a single `<script>` tag. The shell is plain DOM; the
-   message thread is rendered with [assistant-ui](https://www.assistant-ui.com/) (React).
-3. **Session workflow** — chat with the agent while it edits your workspace in place, then
-   click **Create PR** when done: AgentBridge commits the edits onto a fresh branch, opens a
-   pull request, and resets your workspace back to a clean state.
+AgentBridge drops a chat bubble into any web app. You describe a change (optionally clicking the exact element you mean), a coding agent — Claude Code or Cursor — edits your local repo in place so your dev server hot-reloads live, and when you're happy you click **Create PR** to open a pull request with just the agent's changes.
 
 ```
 ┌─────────────────┐   WebSocket    ┌──────────────────────────┐
-│  Vanilla-JS     │ <============> │  FastAPI backend         │
-│  chat widget    │   (JSON msgs)  │  (runs on dev machine)   │
-│  (in host app)  │                │  Sessions · Git · Agents │
+│  Chat widget    │ <============> │  FastAPI backend         │
+│  (in host app)  │   (JSON msgs)  │  (runs on dev machine)   │
+│  Shadow DOM      │                │  Sessions · Git · Agents │
 └─────────────────┘                └──────────────────────────┘
                                           │ runs agents + git in
                                           ▼ your repo (the workspace)
 ```
 
-> **v1 scope:** local, single developer. No auth/multi-tenancy. PRs target GitHub.
-> Claude Code and Cursor are fully wired; Aider and Copilot are stubs behind the same
-> adapter interface (they appear in the picker as unavailable until implemented).
+### Three parts
 
-## Quickstart
+1. **Backend** (`backend/`) — a FastAPI server that orchestrates coding agents against your local repo and handles git/PR.
+2. **Widget** (`widget/`) — a Shadow-DOM chat bubble you embed with a single `<script>` tag. The shell is plain DOM; the message thread renders with [assistant-ui](https://www.assistant-ui.com/) (React).
+3. **Session workflow** — chat while the agent edits your workspace in place, then click **Create PR** to commit *only the agent's edits* onto a fresh branch and open a pull request — your other uncommitted work is left untouched.
 
-### 1. Run the backend in your repo
+> **Scope:** local, single developer. No auth/multi-tenancy. PRs target GitHub. Claude Code and Cursor are fully wired; Aider and Copilot are stubs behind the same adapter interface (they appear in the picker as unavailable until implemented).
+
+---
+
+## Prerequisites
+
+- **Git** and a **GitHub repo** you want to edit (PR creation is GitHub-only for now).
+- A coding agent on the machine running the backend:
+  - **Claude Code** — the `@anthropic-ai/claude-code` CLI + a Claude subscription token or `ANTHROPIC_API_KEY`, or
+  - **Cursor** — the `cursor-agent` CLI.
+- For a **direct (non-Docker)** run: **Python 3.10+** and **Node 18+** (to build the widget).
+- For **Docker**: just Docker + Docker Compose (the image bundles git, Node, and the Claude Code CLI).
+
+---
+
+## Quickstart (Docker — recommended)
+
+```bash
+git clone https://github.com/omerts/qai.git agentbridge && cd agentbridge
+cp .env.example .env        # set WORKSPACE + Claude auth + GITHUB_TOKEN (see below)
+docker compose up --build   # http://localhost:8000  ·  ws://localhost:8000/ws
+```
+
+Then embed the widget in your app (the bundle is served by the backend):
+
+```html
+<script
+  src="http://localhost:8000/widget/agentbridge-widget.js"
+  data-server="ws://localhost:8000/ws"
+></script>
+```
+
+Open your app, click the chat bubble, pick an agent, and start. Framework snippets (React, Vue, Angular, plain HTML) live in [`widget/examples/`](widget/examples).
+
+### `.env` essentials
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `WORKSPACE` | ✅ | Absolute path to the git repo the agent edits (bind-mounted at `/workspace`). |
+| `CLAUDE_CODE_OAUTH_TOKEN` | one of | Claude subscription token from `claude setup-token` (no API billing). |
+| `ANTHROPIC_API_KEY` | one of | Use API billing instead. If both are set, the API key wins. |
+| `GITHUB_TOKEN` / `GH_TOKEN` | for PRs | Token with `repo` scope — used to push and open PRs over HTTPS (no ssh needed). |
+| `PUID` / `PGID` | optional | Run as your host user so the agent's edits stay owned by you. Defaults to `1000:1000`; set to your `id -u`/`id -g` if different. |
+
+See [`.env.example`](.env.example) for the full list (port, worktree/state dirs, Claude setting sources, sandbox toggle).
+
+> **Auth without an API key:** run `claude setup-token` on your host and put the result in `CLAUDE_CODE_OAUTH_TOKEN` (leave `ANTHROPIC_API_KEY` empty). If you run the backend *directly* on a machine already logged into Claude Code, no token is needed — keep `ANTHROPIC_API_KEY` unset so it reuses your login instead of API billing.
+
+> **Reclaiming file ownership:** if an earlier run (as root) left root-owned files in your repo, fix them once with `sudo chown -R $(id -u):$(id -g) /path/to/your/repo`, and make sure `PUID`/`PGID` match your user.
+
+---
+
+## Quickstart (direct, no Docker)
 
 ```bash
 cd backend
@@ -42,165 +84,106 @@ AGENTBRIDGE_WORKSPACE=/path/to/your/repo agentbridge
 # Server: http://127.0.0.1:8000  ·  WS: ws://127.0.0.1:8000/ws
 ```
 
-Configuration (all optional, via env vars):
-
-| Variable                 | Default       | Purpose                                  |
-| ------------------------ | ------------- | ---------------------------------------- |
-| `AGENTBRIDGE_WORKSPACE`  | cwd           | Repo the agent operates on               |
-| `AGENTBRIDGE_HOST`       | `127.0.0.1`   | Bind host                                |
-| `AGENTBRIDGE_PORT`       | `8000`        | Bind port                                |
-| `AGENTBRIDGE_WORKTREE_DIR`| `<repo>/../.agentbridge-worktrees` | Where branch worktrees are created |
-| `AGENTBRIDGE_STATE_DIR`  | `~/.agentbridge` | Where chat history is persisted (per workspace) |
-| `AGENTBRIDGE_CLAUDE_SETTING_SOURCES` | `user,project` | Which Claude Code settings to load from disk (`local` omitted so no `.claude` files are written into your workspace; empty = CLI default) |
-| `GITHUB_TOKEN`/`GH_TOKEN`| —             | Push + PR creation over HTTPS (falls back to `gh auth token`); no ssh needed |
-
-### Run with Docker (alternative to step 1)
-
-```bash
-cp .env.example .env          # set WORKSPACE (repo to edit), ANTHROPIC_API_KEY, GITHUB_TOKEN
-docker compose up --build     # server on http://localhost:8000, WS at ws://localhost:8000/ws
-```
-
-The image bundles git and the Claude Code CLI. Your repo is bind-mounted at `/workspace`
-(the agent edits it and runs git there). See [docker-compose.yml](docker-compose.yml) and
-[backend/Dockerfile](backend/Dockerfile).
-
-The container drops from root to your host user so the agent's edits stay owned by you (and
-stay editable on the host). It defaults to UID/GID `1000:1000`; if `id -u`/`id -g` differ,
-set `PUID`/`PGID` in `.env`. If earlier runs left root-owned files in your repo, reclaim them
-once with `sudo chown -R $(id -u):$(id -g) /path/to/your/repo`.
-
-**Auth with your Claude subscription (no API key):** run `claude setup-token` on your host
-and put the token in `.env` as `CLAUDE_CODE_OAUTH_TOKEN` (leave `ANTHROPIC_API_KEY` empty).
-If you run the backend *directly* on a machine where you're already logged into Claude Code,
-no token is needed — the CLI reuses your login automatically (just keep `ANTHROPIC_API_KEY`
-unset so it doesn't fall back to API billing).
-
-### 2. Build & embed the widget
+Build & serve the widget:
 
 ```bash
 cd widget && npm install && npm run build   # produces widget/dist/agentbridge-widget.js
 ```
 
-```html
-<script
-  src="http://localhost:8000/widget/agentbridge-widget.js"
-  data-server="ws://localhost:8000/ws"
-></script>
-```
+Configuration (all optional, via env vars):
 
-Framework snippets live in [`widget/examples/`](widget/examples) (React, Vue, Angular,
-plain HTML).
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AGENTBRIDGE_WORKSPACE` | cwd | Repo the agent operates on |
+| `AGENTBRIDGE_HOST` | `127.0.0.1` | Bind host |
+| `AGENTBRIDGE_PORT` | `8000` | Bind port |
+| `AGENTBRIDGE_AGENT` | `claude-code` | Default agent for new chats |
+| `AGENTBRIDGE_WORKTREE_DIR` | `<repo>/../.agentbridge-worktrees` | Where branch worktrees are created |
+| `AGENTBRIDGE_STATE_DIR` | `~/.agentbridge` | Where chat history is persisted (per workspace) |
+| `AGENTBRIDGE_CLAUDE_SETTING_SOURCES` | `user,project` | Which Claude Code settings to load from disk (`local` omitted so no `.claude` files are written into your workspace; empty = CLI default) |
+| `GITHUB_TOKEN` / `GH_TOKEN` | — | Push + PR over HTTPS (falls back to `gh auth token`) |
+| `GITHUB_REPOSITORY` | — | `owner/name` override when your `origin` remote can't be parsed (e.g. a custom ssh host alias) |
+
+---
 
 ## Coding agents
 
-| Agent        | Driver                                   | Status        |
-| ------------ | ---------------------------------------- | ------------- |
-| Claude Code  | `claude-agent-sdk` (`ClaudeSDKClient`)   | ✅ implemented |
-| Cursor       | `cursor-agent` CLI (`stream-json`)       | ✅ implemented |
-| Aider        | Python `Coder` API                       | 🚧 stub        |
-| Copilot      | `gh copilot` / Copilot CLI               | 🚧 stub        |
+| Agent | Driver | Status |
+| --- | --- | --- |
+| Claude Code | `claude-agent-sdk` (`ClaudeSDKClient`) | ✅ implemented |
+| Cursor | `cursor-agent` CLI (`stream-json`) | ✅ implemented |
+| Aider | Python `Coder` API | 🚧 stub |
+| Copilot | `gh copilot` / Copilot CLI | 🚧 stub |
 
-**Interactive approvals.** Claude Code runs in `default` permission mode: when it wants to
-edit/write/run a command, the widget shows an **Allow / Deny** card and the agent blocks
-until you answer (the reply is fed back into the SDK's `can_use_tool` callback). Cursor runs
-headless (`--print --force --trust`) so it doesn't block on approval prompts; it streams
-incremental output via `stream-json --stream-partial-output` and keeps multi-turn context
-through a `create-chat` id passed to `--resume`.
+Each agent implements the `AgentAdapter` contract in [`backend/agentbridge/agents/base.py`](backend/agentbridge/agents/base.py). Add a new agent by writing one adapter and registering it in `agents/registry.py`.
 
-**Auto-approve (default on).** The widget has a shield toggle (next to the inspect button)
-that auto-approves the agent's routine actions so it can work without stopping for every
-edit. When on, file edits and ordinary shell commands run without a prompt — but commands
-that look destructive or hard to undo (`rm -rf`, `sudo`, `git push --force`,
-`git reset --hard`, `curl … | sh`, recursive `chmod`/`chown`, disk writes, `shutdown`, …)
-still surface an **Allow / Deny** card. Turn the toggle off to confirm every action. The
-preference is per-browser (`localStorage`) and sent with each message (`auto_approve`); it
-only affects Claude Code (Cursor is already headless).
+### Approvals
 
-Each agent implements the `AgentAdapter` contract in
-[`backend/agentbridge/agents/base.py`](backend/agentbridge/agents/base.py). Add a new agent
-by writing one adapter and registering it in `agents/registry.py`.
+- **Interactive (Claude Code).** Runs in `default` permission mode: when it wants to edit/write/run a command, the widget shows an **Allow / Deny** card and the agent blocks until you answer.
+- **Auto-approve (default on).** A shield toggle lets routine actions run without prompting — but commands that look destructive (`rm -rf`, `sudo`, `git push --force`, `git reset --hard`, `curl … | sh`, recursive `chmod`/`chown`, disk writes, `shutdown`, …) still surface an Allow / Deny card. The preference is per-browser and only affects Claude Code (Cursor runs headless).
+- **Stop & queue.** Stop a running turn at any time, and queue follow-up messages while the agent is busy.
 
-**Workspace settings.** Agents run in your workspace and honor its own configuration, so the
-rules/permissions/tools/MCP servers you've already set up apply:
+### Workspace settings
 
-- **Claude Code** loads the workspace's `.claude/settings.json`, `.mcp.json`, hooks, custom
-  agents, and `CLAUDE.md`, plus your user settings in `~/.claude`. (In SDK/`--print` mode the
-  CLI doesn't read filesystem settings unless asked, so AgentBridge passes
-  `--setting-sources user,project`.) It **deliberately omits** the `local` source
-  (`.claude/settings.local.json`) — that's a per-user, machine-local permission cache the CLI
-  *writes* to, and excluding it keeps AgentBridge from reading or **creating any `.claude`
-  file in your workspace**; approvals flow through the widget's Allow/Deny card at runtime
-  instead. Tune via `AGENTBRIDGE_CLAUDE_SETTING_SOURCES` — e.g. add `local` back to honor the
-  workspace's local settings, `project` to ignore your global user settings, or empty for the
-  CLI default. Permission rules in the loaded settings are applied first; the Allow/Deny card
-  only appears for actions they don't already decide.
-- **Cursor** runs in the workspace too, so it picks up `.cursor/rules`, `.cursorrules`, and
-  `AGENTS.md` automatically.
+Agents run *in your workspace* and honor its own configuration:
 
-> In Docker, the workspace's `.claude`/`.cursor` come from the bind-mounted repo; the `user`
-> source reads `/root/.claude` (the `agentbridge-claude-home` volume).
+- **Claude Code** loads the workspace's `.claude/settings.json`, `.mcp.json`, hooks, custom agents, and `CLAUDE.md`, plus your user settings (`~/.claude`; in Docker, the `agentbridge-claude-home` volume at `/home/app/.claude`). It deliberately omits the `local` source (`.claude/settings.local.json`) so AgentBridge never reads or **creates a `.claude` file in your workspace** — approvals flow through the Allow/Deny card instead. Tune with `AGENTBRIDGE_CLAUDE_SETTING_SOURCES`.
+- **Cursor** picks up `.cursor/rules`, `.cursorrules`, and `AGENTS.md` automatically.
 
-## Workflow
+---
+
+## How the workflow works
 
 1. Open the bubble → pick an agent → a session starts **on your current branch**.
-2. Describe a change in chat → the agent streams its work; edited files show in the footer.
-3. Click **Create PR** → AgentBridge commits the edits onto a fresh branch, pushes, opens a
-   GitHub PR (the link appears in chat), and resets your workspace back to a clean state.
+2. Describe a change → the agent streams its work; edited files show in the footer. Your dev server hot-reloads because edits happen **directly in your workspace**.
+3. Click **Create PR** → AgentBridge commits **only the files the agent touched** onto a fresh branch (via a [git worktree](https://git-scm.com/docs/git-worktree), so your checked-out branch is never switched), pushes over HTTPS, and opens a GitHub PR — the link appears in chat.
 
-### Edit in place, branch at PR time (hot reload works)
+**Only the agent's changes are committed.** Files you've edited yourself, or other pre-existing changes in the repo, stay in your workspace and are never swept into the PR.
 
-The agent edits files **directly in your workspace directory** the whole time it's working,
-so a dev server running there with hot reload shows its changes **live** — no extra setup.
-
-Your workspace's checked-out branch is never switched or committed to. When you click
-**Create PR**, AgentBridge derives a branch name, creates a
-[git worktree](https://git-scm.com/docs/git-worktree) for it, relocates your in-place edits
-onto it, and commits/pushes from there — then opens the PR. After that the workspace is
-**reset** back to a clean state on its original branch.
-
-> Worktrees are created lazily at PR time under `AGENTBRIDGE_WORKTREE_DIR` (default: a
-> `.agentbridge-worktrees` folder beside your repo; a persistent `/worktrees` volume in
-> Docker). Because the agent works in the workspace, its conversation is never reset.
-
-### Multiple chats & history
-
-The widget runs many chats over one connection. Use **+** to start a chat and **☰** to
-browse, reopen, or delete previous ones. State is persisted on the backend under
-`AGENTBRIDGE_STATE_DIR` (per workspace), so:
-
-- Your **selected agent** and **last open chat** are restored after a page refresh
-  (kept in the browser's `localStorage`).
-- Chat **transcripts** survive refreshes and server restarts, and are replayed when you
-  reopen a chat.
-- Reopening a chat **resumes the agent's context** — Claude via its `resume` session id,
-  Cursor via `--resume` — so it continues where it left off rather than starting cold.
-  (Resuming needs the agent CLI's own stored conversation; in Docker that's kept on the
-  `agentbridge-claude-home` volume. If it can't be resumed, the chat continues fresh and
-  says so.)
-
-Because every chat edits the same workspace, agent turns are **serialized** — only one runs
-at a time across all chats.
+**Meaningful PR titles.** Type a title before clicking Create PR to set it; otherwise AgentBridge derives one (and a body listing the changed files) from the agent's own summary of what it did.
 
 ### What the agent sees (page context)
 
-With every message the widget attaches lightweight **browser context** to help the agent:
-the current route/URL, the detected framework + version (React / Vue / Angular), the page
-title, and a best-effort list of components on the page. Use the **crosshair button** to
-turn on *inspect mode*, then click any element on your app — its tag, CSS selector, text,
-and (where resolvable) the owning component name and source file are attached to your next
-message as context.
+With every message the widget attaches lightweight **browser context**: the current route/URL, detected framework + version, page title, and components on the page. Use the **crosshair (inspect) button** to click any element — its tag, selector, and text are attached, and AgentBridge resolves it to a real file in your repo so the agent goes straight there instead of searching:
+
+- **Route → page file** (e.g. `/auth/login` → `app/auth/login/page.tsx`) for Next.js App/Pages Router, honoring route groups and dynamic segments.
+- **Source hint → repo file** from React's dev source info, mapped to a workspace-relative path.
+- **Component chain → your component**, walking the React fiber tree to skip library wrappers (e.g. Ant Design's `Wave`) and land on the first component defined in *your* repo.
+
+### Multiple chats, history & resume
+
+One connection runs many chats (**+** to start, **☰** to browse/reopen/delete). Transcripts persist on the backend (`AGENTBRIDGE_STATE_DIR`, per workspace) and survive refreshes and restarts. Reopening a chat **resumes the agent's context** (Claude via its `resume` id, Cursor via `--resume`). Because every chat edits the same workspace, agent turns are **serialized** — one at a time.
+
+### Widget version
+
+The widget is stamped with a build version (package version + git sha), shown next to the title in the header and available as `window.AgentBridge.version` — handy for confirming a deploy is serving the build you expect. The backend serves the bundle with `Cache-Control: no-cache` so a refresh always picks up a rebuild.
+
+---
+
+## GitHub push/PR notes
+
+Pushing and PR creation use a token over **HTTPS** (`GITHUB_TOKEN`/`GH_TOKEN`, or `gh auth token`) — no ssh required, which matters in containers. AgentBridge recognizes both `github.com` remotes and custom ssh host aliases (e.g. `git@github-myorg:owner/repo.git`). If your `origin` can't be parsed, set `GITHUB_REPOSITORY=owner/name` to point it explicitly.
+
+---
 
 ## Development
 
 ```bash
-cd backend && . .venv/bin/activate
-pytest                                   # protocol, git service, registry, session flow
+cd backend && . .venv/bin/activate && pytest    # protocol, git service, registry, session flow
+cd widget && node test/smoke.mjs                # jsdom smoke test of the widget bundle
 ```
 
 ## Project layout
 
 ```
-backend/   FastAPI server, agent adapters, git service, WS protocol
+backend/   FastAPI server, agent adapters, git service, WS protocol, tests
 widget/    Shadow-DOM widget (React/assistant-ui thread) + esbuild build + framework examples
 ```
+
+## Contributing
+
+Issues and PRs welcome. Good first contributions: implementing the Aider/Copilot adapters (one file each behind `AgentAdapter`), or adding framework examples. Please run the backend tests and the widget smoke test before opening a PR.
+
+## License
+
+[MIT](LICENSE) © Omer Spalter
