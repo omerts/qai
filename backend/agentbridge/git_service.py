@@ -202,6 +202,56 @@ class GitService:
             entries.append(name + ("/" if " tree " in meta else ""))
         return sorted(entries)
 
+    def _tracked_files(self) -> list[str]:
+        """All tracked files, repo-root-relative (forward slashes). Empty on any error."""
+        try:
+            out = self.repo.git.ls_files()
+        except GitCommandError:
+            return []
+        return [ln for ln in out.splitlines() if ln]
+
+    @staticmethod
+    def _normalize_source_path(raw: str) -> str:
+        """Strip the cruft a browser puts around a source path (URL schemes, query strings,
+        bundler prefixes, leading ./ or /), leaving something close to a repo-relative path.
+        Suffix matching in :meth:`resolve_tracked_path` tolerates whatever prefix remains."""
+        p = raw.strip().split("?", 1)[0].split("#", 1)[0].replace("\\", "/")
+        for scheme in ("webpack-internal:///", "webpack://", "file://", "rsc://React/Server/", "rsc://React/Client/"):
+            if p.startswith(scheme):
+                p = p[len(scheme):]
+        p = re.sub(r"^\(.*?\)/", "", p)  # webpack "(namespace)/..." wrappers
+        p = p.lstrip("/")
+        while p.startswith("./"):
+            p = p[2:]
+        return p
+
+    def resolve_tracked_path(self, raw: str) -> str | None:
+        """Map a browser-reported source path (often an absolute build-machine path that does
+        not exist under the agent's workspace) to a real repo-relative tracked file, so the
+        agent opens it directly instead of searching. Matches by longest unique path suffix;
+        returns None if nothing matches or the match is ambiguous."""
+        cand = self._normalize_source_path(raw or "")
+        if not cand:
+            return None
+        files = self._tracked_files()
+        if not files:
+            return None
+        file_set = set(files)
+        if cand in file_set:
+            return cand
+        segs = [s for s in cand.split("/") if s]
+        # Most specific first: try the full suffix, then drop leading segments.
+        for start in range(len(segs)):
+            suffix = "/".join(segs[start:])
+            if suffix in file_set:
+                return suffix
+            matches = [f for f in files if f.endswith("/" + suffix)]
+            if len(matches) == 1:
+                return matches[0]
+            if len(matches) > 1:
+                return None  # ambiguous at the most specific level that matched
+        return None
+
     def is_path_dirty(self, path: str) -> bool:
         """Whether ``path`` (workspace-relative) has uncommitted changes (modified, staged,
         deleted, or untracked)."""

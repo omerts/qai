@@ -39,6 +39,21 @@ def _init_repo(path: Path) -> None:
     subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=path, check=True)
 
 
+def test_format_context_resolves_element_source_to_repo_path(tmp_path: Path):
+    # A selected element carries a browser-reported absolute path; the preamble should point the
+    # agent at the real repo-relative file so it doesn't search.
+    _init_repo(tmp_path)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "StatusTabs.tsx").write_text("export const StatusTabs = () => null\n")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "add"], cwd=tmp_path, check=True)
+
+    session = _make_session(tmp_path, send=lambda m: _noop())
+    ctx = {"element": {"label": "<div>", "source": {"file": "/build/host/src/StatusTabs.tsx", "line": 12}}}
+    out = session._format_context(ctx)
+    assert "Source file (open this first): src/StatusTabs.tsx:12" in out
+
+
 async def test_stub_adapters_unavailable_and_raise():
     assert AiderAdapter.is_available() is False
     assert CopilotAdapter.is_available() is False

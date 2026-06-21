@@ -215,6 +215,43 @@ def test_top_level_entries_marks_dirs(repo: Path):
     assert "README.md" in entries  # file unmarked
 
 
+def _commit_file(repo: Path, rel: str) -> None:
+    target = repo / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("x")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", f"add {rel}"], cwd=repo, check=True)
+
+
+def test_resolve_tracked_path_from_absolute_build_path(repo: Path):
+    # The browser reports an absolute build-machine path; resolve it to the repo-relative file
+    # so the agent opens it directly instead of searching.
+    _commit_file(repo, "apps/dashboards/app/StatusTabs.tsx")
+    svc = GitService(repo)
+    got = svc.resolve_tracked_path("/home/ubuntu/codevisionary/apps/dashboards/app/StatusTabs.tsx")
+    assert got == "apps/dashboards/app/StatusTabs.tsx"
+
+
+def test_resolve_tracked_path_strips_bundler_prefixes(repo: Path):
+    _commit_file(repo, "src/components/Button.tsx")
+    svc = GitService(repo)
+    assert svc.resolve_tracked_path("webpack-internal:///./src/components/Button.tsx?abc") == "src/components/Button.tsx"
+
+
+def test_resolve_tracked_path_ambiguous_returns_none(repo: Path):
+    # Same basename in two places -> a bare suffix is ambiguous, so we don't guess.
+    _commit_file(repo, "a/index.tsx")
+    _commit_file(repo, "b/index.tsx")
+    svc = GitService(repo)
+    assert svc.resolve_tracked_path("/somewhere/index.tsx") is None
+    # ...but a longer, unique suffix still resolves.
+    assert svc.resolve_tracked_path("/build/a/index.tsx") == "a/index.tsx"
+
+
+def test_resolve_tracked_path_unknown_returns_none(repo: Path):
+    assert GitService(repo).resolve_tracked_path("/x/y/DoesNotExist.tsx") is None
+
+
 def test_status_reports_changes(repo: Path):
     svc = GitService(repo)
     (repo / "new.txt").write_text("data")

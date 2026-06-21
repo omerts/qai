@@ -781,14 +781,39 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   };
 
   AgentBridgeWidget.prototype._sourceHint = function (el) {
+    // 1) Some dev tooling (e.g. react-dev-inspector, vite plugins) stamps the source straight
+    //    onto the DOM. Cheapest and most reliable when present.
+    try {
+      for (var node = el; node && node.nodeType === 1; node = node.parentElement) {
+        var rel = node.getAttribute("data-inspector-relative-path") || node.getAttribute("data-source-file");
+        if (rel) {
+          return {
+            file: rel,
+            line: parseInt(node.getAttribute("data-inspector-line") || node.getAttribute("data-source-line"), 10) || null,
+            column: parseInt(node.getAttribute("data-inspector-column") || "", 10) || null,
+          };
+        }
+      }
+    } catch (e) {}
+    // 2) React fiber: _debugSource (React ≤18) or the __source prop the JSX-source Babel plugin
+    //    attaches (both dev-only). Walk up, preferring app source over library frames so the
+    //    hint points at the user's component, not a node_modules wrapper.
     try {
       var key = Object.keys(el).find(function (k) { return k.indexOf("__reactFiber$") === 0; });
       if (!key) return null;
       var fiber = el[key];
-      for (var d = 0; fiber && d < 40; d++, fiber = fiber.return) {
-        var src = fiber._debugSource;
-        if (src && src.fileName) return { file: src.fileName, line: src.lineNumber || null };
+      var fallback = null;
+      for (var d = 0; fiber && d < 60; d++, fiber = fiber.return) {
+        var src = fiber._debugSource
+          || (fiber.memoizedProps && fiber.memoizedProps.__source)
+          || (fiber.pendingProps && fiber.pendingProps.__source);
+        if (src && src.fileName) {
+          var hint = { file: src.fileName, line: src.lineNumber || null, column: src.columnNumber || null };
+          if (src.fileName.indexOf("node_modules") === -1) return hint; // app source — best match
+          if (!fallback) fallback = hint;                                // library frame — keep looking
+        }
       }
+      return fallback;
     } catch (e) {}
     return null;
   };

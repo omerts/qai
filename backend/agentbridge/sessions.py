@@ -373,8 +373,7 @@ class Session:
             return
         await self.send(P.FileChanges(chat_id=self.chat_id, files=changes))
 
-    @staticmethod
-    def _format_context(ctx: dict | None) -> str:
+    def _format_context(self, ctx: dict | None) -> str:
         if not isinstance(ctx, dict):
             return ""
         lines: list[str] = []
@@ -409,8 +408,15 @@ class Session:
                 lines.append(f"- Text content: {el['text']}")
             src = el.get("source")
             if isinstance(src, dict) and src.get("file"):
-                loc = src["file"] + (f":{src['line']}" if src.get("line") else "")
-                lines.append(f"- Source hint: {loc}")
+                suffix = f":{src['line']}" if src.get("line") else ""
+                # The browser reports a build-time/absolute path that usually doesn't exist under
+                # the agent's workspace. Resolve it to a real repo-relative file so the agent
+                # opens it directly instead of hunting for it.
+                resolved = self.git.resolve_tracked_path(str(src["file"]))
+                if resolved:
+                    lines.append(f"- Source file (open this first): {resolved}{suffix}")
+                else:
+                    lines.append(f"- Source hint (from the browser; may need locating): {src['file']}{suffix}")
         return "\n".join(lines).strip()
 
 
