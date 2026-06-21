@@ -360,18 +360,21 @@ class Session:
         parts.append("_Opened via AgentBridge._")
         return "\n\n".join(parts)
 
-    async def _refresh_files(self) -> None:
-        try:
-            self.record.files = [c.model_dump() for c in self.git.status()]
-        except GitError:
-            pass
-
-    async def _send_file_changes(self) -> None:
+    def _agent_file_changes(self) -> list[P.FileChange]:
+        """Working-tree changes limited to files THIS agent touched in this chat, so the chat's
+        file list never shows the user's own / pre-existing changes."""
         try:
             changes = self.git.status()
         except GitError:
-            return
-        await self.send(P.FileChanges(chat_id=self.chat_id, files=changes))
+            return []
+        touched = set(self.record.touched)
+        return [c for c in changes if c.path in touched]
+
+    async def _refresh_files(self) -> None:
+        self.record.files = [c.model_dump() for c in self._agent_file_changes()]
+
+    async def _send_file_changes(self) -> None:
+        await self.send(P.FileChanges(chat_id=self.chat_id, files=self._agent_file_changes()))
 
     def _format_context(self, ctx: dict | None) -> str:
         if not isinstance(ctx, dict):

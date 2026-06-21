@@ -172,6 +172,22 @@ def test_full_session_flow(client):
         assert "my_notes.txt" in porcelain and "feature.txt" not in porcelain
 
 
+def test_chat_file_list_shows_only_agent_changes(client):
+    """The footer/file list reflects only what the agent touched — a pre-existing user change
+    in the workspace must not appear in the chat as if the agent made it."""
+    tc, repo, _ = client
+    # The user already has an unrelated change before the agent ever runs.
+    (repo / "user_wip.txt").write_text("my own edit\n")
+    with tc.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "start_session", "agent": "fake", "title": "feat"})
+        chat_id = _recv_until(ws, "session_started")["chat_id"]
+        ws.send_json({"type": "user_message", "chat_id": chat_id, "text": "add a feature"})
+        fc = _recv_until(ws, "file_changes")
+        paths = {f["path"] for f in fc["files"]}
+        assert "feature.txt" in paths        # the agent's edit shows
+        assert "user_wip.txt" not in paths   # the user's pre-existing change does not
+
+
 def test_second_pr_does_not_commit_manual_changes(client):
     """The reported bug: after a PR, a purely manual edit (no agent turn) must NOT be swept
     into a commit. With nothing of the agent's left, Create PR reports that and touches nothing."""
