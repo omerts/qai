@@ -327,16 +327,19 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   };
 
   AgentBridgeWidget.prototype._restorePosition = function () {
-    var raw = lsGet(LS_POS);
-    if (!raw) return;
-    try {
-      var a = JSON.parse(raw);
-      if (a && (a.h === "left" || a.h === "right") && (a.v === "top" || a.v === "bottom")) {
-        this._anchor = a;
-        this._clampAnchor();   // re-fit in case the viewport changed since the drag
-        this._applyAnchor();
-      }
-    } catch (e) {}
+    var stored = null, raw = lsGet(LS_POS);
+    if (raw) {
+      try {
+        var a = JSON.parse(raw);
+        if (a && (a.h === "left" || a.h === "right") && (a.v === "top" || a.v === "bottom")) stored = a;
+      } catch (e) {}
+    }
+    // Always establish a real anchor — defaulting to the configured corner — and apply it. This
+    // makes the initial render and the FIRST open use the exact same positioning as every later
+    // open, so the panel never opens off-screen and "auto-corrects" (which also shifted the bubble).
+    this._anchor = stored || { h: this.position === "bottom-left" ? "left" : "right", v: "bottom", x: 20, y: 20 };
+    this._clampAnchor();   // re-fit in case the viewport changed since the drag
+    this._applyAnchor();
   };
 
   AgentBridgeWidget.prototype._toggleDrawer = function (force) {

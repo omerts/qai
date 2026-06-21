@@ -49,6 +49,10 @@ assert.ok(AgentBridge.version && AgentBridge.version !== "dev", "widget version 
 
 const widget = AgentBridge.init({ server: "ws://localhost:9/ws" });
 assert.ok(widget && widget.shadow, "widget did not mount a shadow root");
+// On init the widget has a real corner anchor applied (not just the CSS default), so the first
+// open positions identically to every later one — no off-screen flash / auto-correct.
+assert.ok(widget._anchor && widget._anchor.h && widget._anchor.v, "no default anchor on init");
+assert.ok(widget.root.style.bottom !== "auto" && widget.root.style.bottom !== "", "default anchor not applied to root");
 assert.equal(widget.hostEl.getAttribute("data-ab-version"), AgentBridge.version, "host data-ab-version mismatch");
 const verEl = widget.shadow.querySelector(".ab-ver");
 assert.ok(verEl && verEl.textContent === AgentBridge.version, "version not shown in header: " + (verEl && verEl.textContent));
