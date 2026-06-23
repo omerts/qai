@@ -269,6 +269,39 @@
 .ab-drawer-head { padding: 10px 12px; font-weight: 600; font-size: 13px; border-bottom: 1px solid var(--ab-border); color: var(--ab-muted); }
 .ab-drawer-list { flex: 1; overflow-y: auto; }
 .ab-drawer-empty { padding: 16px 12px; color: var(--ab-muted); font-size: 13px; }
+
+/* Plugins (MCP servers) panel — same overlay pattern as the drawer */
+.ab-plugins {
+  position: absolute; inset: 0; background: var(--ab-bg);
+  display: none; flex-direction: column; z-index: 6; overflow-y: auto;
+}
+.ab-plugins.open { display: flex; }
+.ab-plugins-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; border-bottom: 1px solid var(--ab-border);
+}
+.ab-plugins-title { font-weight: 600; font-size: 13px; }
+.ab-plugins-intro { padding: 10px 12px; color: var(--ab-muted); font-size: 12px; }
+.ab-plugins-list { display: flex; flex-direction: column; }
+.ab-plugins-empty { padding: 4px 12px 10px; color: var(--ab-muted); font-size: 13px; }
+.ab-plugin-row {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-top: 1px solid var(--ab-border);
+}
+.ab-plugin-main { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; cursor: pointer; }
+.ab-plugin-name { font-weight: 600; font-size: 13px; }
+.ab-plugin-detail {
+  font-family: var(--ab-mono); font-size: 11px; color: var(--ab-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ab-plugins-presets { display: flex; gap: 8px; padding: 10px 12px; flex-wrap: wrap; }
+.ab-plugin-form:empty { display: none; }
+.ab-plugin-form { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px; }
+.ab-plugin-form-row { display: flex; gap: 8px; }
+.ab-plugin-fields { display: flex; flex-direction: column; gap: 8px; }
+.ab-plugin-input { font-size: 13px; }
+.ab-plugin-form-actions { display: flex; gap: 8px; }
+.ab-plugin-cancel { background: var(--ab-surface); color: var(--ab-fg); }
 .ab-chat-item {
   display: flex; align-items: center; gap: 8px;
   padding: 9px 12px; border-bottom: 1px solid var(--ab-border); cursor: pointer;

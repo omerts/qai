@@ -35,6 +35,9 @@ class SessionContext:
     #: Agent-native handle to resume a prior conversation (Claude session id / Cursor chat
     #: id), or None to start fresh. Adapters that can't resume ignore it.
     resume: str | None = None
+    #: User-registered MCP servers (plugins) as ``{name: sdk_config}``. Adapters that support
+    #: MCP merge these in at start; others ignore it.
+    mcp_servers: dict | None = None
 
 
 EventKind = Literal["chunk", "prompt", "file_touched", "done", "error"]

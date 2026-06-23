@@ -22,6 +22,7 @@ from . import protocol as P
 from .agents.base import AgentEvent, SessionContext
 from .agents.registry import create_adapter, get_adapter_class, list_agent_info
 from .git_service import GitError, GitService, PullRequest
+from .mcp_config import McpServer, McpStore
 from .store import ChatRecord, ChatStore
 
 Send = Callable[[P.ServerMessage], Awaitable[None]]
@@ -83,6 +84,7 @@ class Session:
         store: ChatStore,
         turn_lock: asyncio.Lock,
         notify_chats: Callable[[], Awaitable[None]],
+        mcp_for_sdk: Callable[[], dict],
     ) -> None:
         self.record = record
         self.chat_id = record.id
@@ -92,6 +94,8 @@ class Session:
         self.store = store
         self.turn_lock = turn_lock
         self.notify_chats = notify_chats
+        # Reads the workspace's enabled MCP servers ({name: sdk_config}) at adapter-start time.
+        self.mcp_for_sdk = mcp_for_sdk
 
         self.git = GitService(workspace)
         self.adapter = None
@@ -148,7 +152,8 @@ class Session:
                 raise RuntimeError(f"Agent '{self.record.agent}' is not available on this machine.")
 
             ctx = SessionContext(
-                session_id=self.chat_id, title=self.record.title, resume=self.record.resume_id
+                session_id=self.chat_id, title=self.record.title, resume=self.record.resume_id,
+                mcp_servers=self.mcp_for_sdk(),
             )
             try:
                 await adapter.start(ctx)
@@ -161,7 +166,10 @@ class Session:
                     pass
                 adapter = create_adapter(self.record.agent, self.workspace)
                 await adapter.start(
-                    SessionContext(session_id=self.chat_id, title=self.record.title, resume=None)
+                    SessionContext(
+                        session_id=self.chat_id, title=self.record.title, resume=None,
+                        mcp_servers=self.mcp_for_sdk(),
+                    )
                 )
                 self.record.resume_id = None
                 await self.send(
@@ -567,6 +575,7 @@ class ChatHub:
         self.send = send
         self.github_token = github_token
         self.store = ChatStore(workspace)
+        self.mcp = McpStore(workspace)
         self.git = GitService(workspace)  # validates the workspace is a git repo
         self.sessions: dict[str, Session] = {}
         self.turn_lock = asyncio.Lock()
@@ -584,6 +593,14 @@ class ChatHub:
             await self._delete(msg)
         elif msg.type == "end_session":
             await self._end(msg)
+        elif msg.type == "list_mcp":
+            await self._send_mcp()
+        elif msg.type == "save_mcp":
+            await self._save_mcp(msg)
+        elif msg.type == "delete_mcp":
+            await self._delete_mcp(msg)
+        elif msg.type == "toggle_mcp":
+            await self._toggle_mcp(msg)
         else:
             chat_id = getattr(msg, "chat_id", None)
             session = await self._get_session(chat_id) if chat_id else None
@@ -608,6 +625,7 @@ class ChatHub:
             store=self.store,
             turn_lock=self.turn_lock,
             notify_chats=self._send_chats,
+            mcp_for_sdk=self.mcp.to_sdk,
         )
 
     async def _get_session(self, chat_id: str | None) -> Session | None:
@@ -684,3 +702,39 @@ class ChatHub:
 
     async def _send_chats(self) -> None:
         await self.send(P.Chats(chats=[P.ChatMeta(**m) for m in self.store.list_meta()]))
+
+    # ------------------------------------------------------------------ #
+    # MCP servers (plugins)
+    # ------------------------------------------------------------------ #
+
+    async def _send_mcp(self) -> None:
+        servers = [P.McpServerSpec(**vars(s)) for s in self.mcp.list()]
+        await self.send(P.McpServers(servers=servers))
+
+    async def _save_mcp(self, msg: P.SaveMcp) -> None:
+        server = McpServer(**msg.server.model_dump())
+        if not server.is_valid():
+            need = "a command" if server.transport == "stdio" else "a url"
+            await self.send(P.ErrorMessage(message=f"Can't save plugin '{server.name}': it needs {need}."))
+            return
+        self.mcp.save(server)
+        await self._send_mcp()
+        await self._restart_idle_adapters()
+
+    async def _delete_mcp(self, msg: P.DeleteMcp) -> None:
+        self.mcp.delete(msg.name)
+        await self._send_mcp()
+        await self._restart_idle_adapters()
+
+    async def _toggle_mcp(self, msg: P.ToggleMcp) -> None:
+        self.mcp.set_enabled(msg.name, msg.enabled)
+        await self._send_mcp()
+        await self._restart_idle_adapters()
+
+    async def _restart_idle_adapters(self) -> None:
+        """MCP config is read when an adapter starts, so drop any idle (not mid-turn) adapters;
+        the next turn re-creates them with the new plugin set (resuming via the persisted id).
+        Adapters busy in a turn are left alone and pick up the change on their next turn."""
+        for session in list(self.sessions.values()):
+            if session.adapter is not None and not session._turn_active:
+                await session.close()

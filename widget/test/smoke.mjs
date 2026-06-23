@@ -233,6 +233,34 @@ async function main() {
 
   widget.queue = []; widget._renderQueue(); widget.activeChatId = null;
 
+  // --- Plugins (MCP): open the panel, list servers, add via the form, toggle, delete ---
+  sent.length = 0;
+  widget._togglePlugins(true);
+  const pluginsPanel = widget.shadow.querySelector(".ab-plugins");
+  assert.ok(pluginsPanel.classList.contains("open"), "plugins panel should open");
+  widget._onMcpServers([{ name: "figma", transport: "sse", url: "http://127.0.0.1:3845/sse", enabled: true }]);
+  assert.ok(/figma/.test(widget.shadow.querySelector(".ab-plugins-list").textContent), "registered plugin not listed");
+  const pToggle = widget.shadow.querySelector(".ab-plugin-toggle");
+  assert.ok(pToggle && pToggle.checked, "enabled plugin should show a checked toggle");
+  pToggle.checked = false; pToggle.dispatchEvent(new window.Event("change"));
+  assert.ok(sent.some((m) => m.type === "toggle_mcp" && m.name === "figma" && m.enabled === false),
+    "toggling a plugin should send toggle_mcp");
+  // The form: open it, fill a stdio server, save -> save_mcp with parsed args.
+  widget._openPluginForm(null);
+  const inputs = widget.shadow.querySelectorAll(".ab-plugin-form .ab-plugin-input");
+  inputs[0].value = "db";                       // name
+  widget.shadow.querySelectorAll(".ab-plugin-form .ab-plugin-input")[2].value = "db-mcp";  // command
+  widget.shadow.querySelectorAll(".ab-plugin-form .ab-plugin-input")[3].value = "--port 5432"; // args
+  widget.shadow.querySelector(".ab-plugin-form-actions .ab-btn").click();   // Save
+  const saveMsg = sent.find((m) => m.type === "save_mcp");
+  assert.ok(saveMsg && saveMsg.server.name === "db" && saveMsg.server.command === "db-mcp", "save_mcp not sent");
+  assert.deepEqual(saveMsg.server.args, ["--port", "5432"], "args not parsed into a list");
+  // Delete sends delete_mcp.
+  widget.shadow.querySelector(".ab-plugin-row .ab-chip-x").click();
+  assert.ok(sent.some((m) => m.type === "delete_mcp" && m.name === "figma"), "delete_mcp not sent");
+  widget._togglePlugins(false);
+  assert.ok(!pluginsPanel.classList.contains("open"), "plugins panel should close");
+
   // Toggling auto-approve drops a system note into the chat (on, then off).
   widget.bridge.reset();
   widget._toggleAutoApprove();
@@ -304,7 +332,7 @@ async function main() {
   assert.equal(widget.root.style.left, "auto", "left should be released for a right anchor");
   assert.equal(widget.root.style.top, "auto", "top should be released for a bottom anchor");
 
-  console.log("OK — widget mounts, streams, renders markdown, resets, attaches files, drags (panel + bubble), and themes per agent.");
+  console.log("OK — widget mounts, streams, renders markdown, resets, attaches files, manages plugins, drags (panel + bubble), and themes per agent.");
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error("FAIL:", e.message); process.exit(1); });

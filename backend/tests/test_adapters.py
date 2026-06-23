@@ -27,6 +27,7 @@ def _make_session(tmp_path: Path, send, agent: str = "fake") -> Session:
         store=store,
         turn_lock=asyncio.Lock(),
         notify_chats=_noop,
+        mcp_for_sdk=dict,
     )
 
 

@@ -150,6 +150,14 @@ With every message the widget attaches lightweight **browser context**: the curr
 - **Source hint → repo file** from React's dev source info, mapped to a workspace-relative path.
 - **Component chain → your component**, walking the React fiber tree to skip library wrappers (e.g. Ant Design's `Wave`) and land on the first component defined in *your* repo.
 
+### Attaching files
+
+Click the **paperclip** in the composer to attach any files (images, PDFs, data, code) to your next message. They upload over the WebSocket and are saved under a **gitignored** `.agentbridge/uploads/<chat>/` inside your workspace, and the agent is pointed at them by path so it can read them with its normal Read tool (images included). Uploads never show up in git status or get swept into a PR. The per-file size cap is `AGENTBRIDGE_MAX_UPLOAD_MB` (default 25).
+
+### Plugins (MCP servers)
+
+Click the **puzzle-piece** button to connect [MCP](https://modelcontextprotocol.io) servers — e.g. **Figma** (one-click preset for the Figma desktop app's Dev Mode MCP server). Add `stdio` (local command) or `http`/`sse` (remote URL) servers, toggle them on/off, or remove them; the set is persisted per workspace. Enabled servers are passed to Claude Code (alongside any the workspace's own `.mcp.json` already provides), so the agent can use their tools. Changes apply to new or restarted chats. *(MCP wiring currently targets the Claude Code agent.)*
+
 ### Multiple chats, history & resume
 
 One connection runs many chats (**+** to start, **☰** to browse/reopen/delete). Transcripts persist on the backend (`AGENTBRIDGE_STATE_DIR`, per workspace) and survive refreshes and restarts. Reopening a chat **resumes the agent's context** (Claude via its `resume` id, Cursor via `--resume`). Because every chat edits the same workspace, agent turns are **serialized** — one at a time.

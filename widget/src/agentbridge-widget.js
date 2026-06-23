@@ -32,10 +32,16 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   var STOP_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>';
   // Paperclip "attach file" icon.
   var ATTACH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
+  // Puzzle-piece "plugins" icon.
+  var PLUGIN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3a2 2 0 0 1 4 0v1h3a1 1 0 0 1 1 1v3h1a2 2 0 0 1 0 4h-1v3a1 1 0 0 1-1 1h-3v1a2 2 0 0 1-4 0v-1H7a1 1 0 0 1-1-1v-3H5a2 2 0 0 1 0-4h1V5a1 1 0 0 1 1-1h3z"/></svg>';
 
   // Tooltip text for the inspect (crosshair) button, by state.
   var INSPECT_TIP_OFF = "Inspect mode — click, then pick an element on the page to attach it to your next message as context.";
   var INSPECT_TIP_ON = "Inspect mode ON — click an element on the page to attach it (Esc, or click here, to cancel).";
+
+  // Quick-add preset for Figma's local Dev Mode MCP server (Figma desktop app → Preferences →
+  // "Enable Dev Mode MCP server"). Prefilled into the form so the user can tweak before saving.
+  var FIGMA_PRESET = { name: "figma", transport: "sse", url: "http://127.0.0.1:3845/sse" };
 
   var LS_AGENT = "agentbridge:agent";
   var LS_CHAT = "agentbridge:activeChat";
@@ -93,6 +99,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.pendingElement = null;  // element picked via the inspector, attached to next msg
     this.attachments = [];       // uploaded files for the next msg: {id, name, size, status, path}
     this._uploadSeq = 0;         // monotonic id source for correlating upload results
+    this.mcpServers = [];        // registered MCP plugins (from the server)
     this.running = false;        // true while the active chat's agent is working
     this.queue = [];             // follow-ups typed while busy: {text, element, attachments}
     this._inspecting = false;
@@ -178,9 +185,14 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.autoBtn = h("button", { class: "ab-iconbtn ab-autoapprove ab-tip" });
     this.autoBtn.innerHTML = SHIELD_ICON;
     this.autoBtn.addEventListener("click", function () { self._toggleAutoApprove(); });
+    this.pluginsBtn = h("button", { class: "ab-iconbtn ab-pluginsbtn ab-tip" });
+    this.pluginsBtn.innerHTML = PLUGIN_ICON;
+    this.pluginsBtn.setAttribute("data-tip", "Plugins — connect MCP servers like Figma for the agent to use.");
+    this.pluginsBtn.setAttribute("aria-label", "Plugins");
+    this.pluginsBtn.addEventListener("click", function () { self._togglePlugins(); });
     this.branchLabel = h("span", { class: "ab-branch-label" });
     var controls = h("div", { class: "ab-controls" }, [
-      this.agentSelect, this.prBtn, this.inspectBtn, this.autoBtn, this.branchLabel,
+      this.agentSelect, this.prBtn, this.inspectBtn, this.autoBtn, this.pluginsBtn, this.branchLabel,
     ]);
     this._refreshAutoApproveBtn();
 
@@ -193,6 +205,9 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       h("div", { class: "ab-drawer-head", text: "Chats" }),
       this.drawerList,
     ]);
+
+    // Plugins (MCP servers) panel — overlays the messages area when open.
+    this._buildPluginsPanel();
 
     // Changed files
     // Collapsible "changed files" section: a clickable header that toggles the list, which
@@ -242,7 +257,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       h("span", { class: "ab-banner-dot" }), this.bannerText, this.bannerRetry,
     ]);
 
-    var body = h("div", { class: "ab-body" }, [this.messages, this.drawer]);
+    var body = h("div", { class: "ab-body" }, [this.messages, this.drawer, this.pluginsPanel]);
     var panel = h("div", { class: "ab-panel" }, [header, this.banner, controls, body, this.files, this.cardLayer, this.contextBar, this.queueBar, composer]);
     this.root.appendChild(this.bubble);
     this.root.appendChild(panel);
@@ -386,6 +401,122 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   };
   AgentBridgeWidget.prototype._closeDrawer = function () { this._toggleDrawer(false); };
 
+  // ---- Plugins (MCP servers) ------------------------------------------- //
+
+  AgentBridgeWidget.prototype._buildPluginsPanel = function () {
+    var self = this;
+    var close = h("button", { class: "ab-iconbtn", title: "Close", text: "✕" });
+    close.addEventListener("click", function () { self._togglePlugins(false); });
+    var head = h("div", { class: "ab-plugins-head" }, [
+      h("span", { class: "ab-plugins-title", text: "Plugins" }), close,
+    ]);
+    var intro = h("div", { class: "ab-plugins-intro", text:
+      "Connect MCP servers for the agent to use. Changes apply to new or restarted chats." });
+    this.pluginsList = h("div", { class: "ab-plugins-list" });
+    // Quick-add presets + a manual "Add server" toggle.
+    var figma = h("button", { class: "ab-btn ab-plugins-preset", text: "+ Figma" });
+    figma.addEventListener("click", function () { self._openPluginForm(FIGMA_PRESET); });
+    var addBtn = h("button", { class: "ab-btn ab-plugins-add", text: "+ Add server" });
+    addBtn.addEventListener("click", function () { self._openPluginForm(null); });
+    var presets = h("div", { class: "ab-plugins-presets" }, [figma, addBtn]);
+    this.pluginForm = h("div", { class: "ab-plugin-form" });   // populated by _openPluginForm
+    this.pluginsPanel = h("div", { class: "ab-plugins" }, [head, intro, this.pluginsList, presets, this.pluginForm]);
+  };
+
+  AgentBridgeWidget.prototype._togglePlugins = function (force) {
+    var open = force === undefined ? !this.pluginsPanel.classList.contains("open") : force;
+    this.pluginsPanel.classList.toggle("open", open);
+    if (open) { this._toggleDrawer(false); this._renderPlugins(); }
+    else { this.pluginForm.innerHTML = ""; }
+  };
+
+  AgentBridgeWidget.prototype._onMcpServers = function (servers) {
+    this.mcpServers = servers || [];
+    this._renderPlugins();
+  };
+
+  AgentBridgeWidget.prototype._renderPlugins = function () {
+    if (!this.pluginsPanel.classList.contains("open")) return;
+    var self = this;
+    this.pluginsList.innerHTML = "";
+    if (!this.mcpServers.length) {
+      this.pluginsList.appendChild(h("div", { class: "ab-plugins-empty", text: "No plugins yet." }));
+      return;
+    }
+    this.mcpServers.forEach(function (s) {
+      var toggle = h("input", { type: "checkbox", class: "ab-plugin-toggle" });
+      toggle.checked = s.enabled !== false;
+      toggle.addEventListener("change", function () {
+        self._send({ type: "toggle_mcp", name: s.name, enabled: toggle.checked });
+      });
+      var del = h("button", { class: "ab-chip-x", title: "Remove plugin", text: "✕" });
+      del.addEventListener("click", function () { self._send({ type: "delete_mcp", name: s.name }); });
+      var detail = s.transport === "stdio" ? (s.command || "") : (s.url || "");
+      var row = h("div", { class: "ab-plugin-row" }, [
+        h("label", { class: "ab-plugin-main" }, [
+          toggle,
+          h("span", { class: "ab-plugin-name", text: s.name }),
+          h("span", { class: "ab-plugin-detail", title: detail, text: s.transport + " · " + detail }),
+        ]),
+        del,
+      ]);
+      self.pluginsList.appendChild(row);
+    });
+  };
+
+  // Render the add/edit form, optionally prefilled from a preset {name, transport, url|command}.
+  AgentBridgeWidget.prototype._openPluginForm = function (preset) {
+    var self = this;
+    preset = preset || { transport: "stdio" };
+    this.pluginForm.innerHTML = "";
+
+    var name = h("input", { class: "ab-input ab-plugin-input", placeholder: "name (e.g. figma)" });
+    name.value = preset.name || "";
+    var transport = h("select", { class: "ab-select ab-plugin-input" });
+    ["stdio", "http", "sse"].forEach(function (t) {
+      var o = h("option", { value: t, text: t }); if (preset.transport === t) o.selected = true; transport.appendChild(o);
+    });
+    // stdio fields
+    var command = h("input", { class: "ab-input ab-plugin-input", placeholder: "command (e.g. npx)" });
+    command.value = preset.command || "";
+    var args = h("input", { class: "ab-input ab-plugin-input", placeholder: "args, space-separated" });
+    args.value = (preset.args || []).join(" ");
+    // remote fields
+    var url = h("input", { class: "ab-input ab-plugin-input", placeholder: "https://… or http://127.0.0.1:port/…" });
+    url.value = preset.url || "";
+    var stdioWrap = h("div", { class: "ab-plugin-fields" }, [command, args]);
+    var remoteWrap = h("div", { class: "ab-plugin-fields" }, [url]);
+
+    function sync() {
+      var stdio = transport.value === "stdio";
+      stdioWrap.style.display = stdio ? "" : "none";
+      remoteWrap.style.display = stdio ? "none" : "";
+    }
+    transport.addEventListener("change", sync);
+
+    var save = h("button", { class: "ab-btn", text: "Save" });
+    save.addEventListener("click", function () {
+      var spec = { name: name.value.trim(), transport: transport.value, enabled: true };
+      if (!spec.name) { self._system("Give the plugin a name."); return; }
+      if (transport.value === "stdio") {
+        spec.command = command.value.trim();
+        spec.args = args.value.trim() ? args.value.trim().split(/\s+/) : [];
+      } else {
+        spec.url = url.value.trim();
+      }
+      self._send({ type: "save_mcp", server: spec });
+      self.pluginForm.innerHTML = "";
+    });
+    var cancel = h("button", { class: "ab-btn ab-plugin-cancel", text: "Cancel" });
+    cancel.addEventListener("click", function () { self.pluginForm.innerHTML = ""; });
+
+    this.pluginForm.appendChild(h("div", { class: "ab-plugin-form-row" }, [name, transport]));
+    this.pluginForm.appendChild(stdioWrap);
+    this.pluginForm.appendChild(remoteWrap);
+    this.pluginForm.appendChild(h("div", { class: "ab-plugin-form-actions" }, [save, cancel]));
+    sync();
+  };
+
   // ---- WebSocket -------------------------------------------------------- //
 
   AgentBridgeWidget.prototype._connect = function () {
@@ -409,6 +540,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       self._autoOpened = false;
       self._send({ type: "list_agents" });
       self._send({ type: "list_chats" });
+      self._send({ type: "list_mcp" });
     });
     this.ws.addEventListener("message", function (ev) {
       var msg;
@@ -476,6 +608,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     switch (msg.type) {
       case "agents": return this._onAgents(msg.agents);
       case "chats": return this._onChats(msg.chats);
+      case "mcp_servers": return this._onMcpServers(msg.servers);
       case "session_started": return this._onSessionStarted(msg);
       case "chat_history": return this._onChatHistory(msg);
       case "chat_deleted": return this._onChatDeleted(msg);
@@ -1279,7 +1412,8 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.menuBtn.disabled = !on;
     this.newBtn.disabled = !on;
     this.agentSelect.disabled = !on;
-    if (!on) this._setChatActive(false);
+    this.pluginsBtn.disabled = !on;   // plugins are workspace-level but need the server
+    if (!on) { this._setChatActive(false); this._togglePlugins(false); }
   };
 
   AgentBridgeWidget.prototype._setChatActive = function (on) {

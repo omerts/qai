@@ -350,6 +350,44 @@ def test_attachments_passed_to_agent(client):
     assert any(path in t and "Attached files" in t for t in FakeAdapter.received_texts)
 
 
+def test_mcp_server_crud_over_ws(client):
+    """Registering a plugin (MCP server) lists, toggles, and deletes it; invalid specs error."""
+    tc, repo, _ = client
+    with tc.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "list_mcp"})
+        assert _recv_until(ws, "mcp_servers")["servers"] == []
+
+        ws.send_json({"type": "save_mcp", "server": {
+            "name": "figma", "transport": "sse", "url": "http://127.0.0.1:3845/sse",
+        }})
+        servers = _recv_until(ws, "mcp_servers")["servers"]
+        assert len(servers) == 1 and servers[0]["name"] == "figma" and servers[0]["enabled"] is True
+
+        # Invalid: stdio with no command -> error, list unchanged.
+        ws.send_json({"type": "save_mcp", "server": {"name": "bad", "transport": "stdio"}})
+        assert "needs a command" in _recv_until(ws, "error")["message"]
+
+        ws.send_json({"type": "toggle_mcp", "name": "figma", "enabled": False})
+        assert _recv_until(ws, "mcp_servers")["servers"][0]["enabled"] is False
+
+        ws.send_json({"type": "delete_mcp", "name": "figma"})
+        assert _recv_until(ws, "mcp_servers")["servers"] == []
+
+
+def test_mcp_servers_persist_across_connections(client):
+    """A registered plugin survives a reconnect (it's stored per workspace)."""
+    tc, repo, _ = client
+    with tc.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "save_mcp", "server": {
+            "name": "figma", "transport": "sse", "url": "http://127.0.0.1:3845/sse",
+        }})
+        _recv_until(ws, "mcp_servers")
+    with tc.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "list_mcp"})
+        servers = _recv_until(ws, "mcp_servers")["servers"]
+        assert [s["name"] for s in servers] == ["figma"]
+
+
 def _drain_idle(ws, chat_id, limit=30):
     for _ in range(limit):
         msg = ws.receive_json()

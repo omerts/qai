@@ -48,6 +48,20 @@ class ChatMeta(BaseModel):
     message_count: int
 
 
+class McpServerSpec(BaseModel):
+    """An MCP server (plugin) the user has registered. ``stdio`` uses command/args/env; ``http``
+    and ``sse`` use url/headers. Shared by the save request and the list broadcast."""
+
+    name: str
+    transport: Literal["stdio", "http", "sse"] = "stdio"
+    command: str | None = None
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    url: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
+    enabled: bool = True
+
+
 # --------------------------------------------------------------------------- #
 # Client -> server
 # --------------------------------------------------------------------------- #
@@ -140,6 +154,28 @@ class EndSession(BaseModel):
     chat_id: str | None = None
 
 
+class ListMcp(BaseModel):
+    type: Literal["list_mcp"]
+
+
+class SaveMcp(BaseModel):
+    """Add or update an MCP server (plugin), keyed by name."""
+
+    type: Literal["save_mcp"]
+    server: McpServerSpec
+
+
+class DeleteMcp(BaseModel):
+    type: Literal["delete_mcp"]
+    name: str
+
+
+class ToggleMcp(BaseModel):
+    type: Literal["toggle_mcp"]
+    name: str
+    enabled: bool
+
+
 ClientMessage = Annotated[
     Union[
         ListAgents,
@@ -153,6 +189,10 @@ ClientMessage = Annotated[
         StopAgent,
         CreatePR,
         EndSession,
+        ListMcp,
+        SaveMcp,
+        DeleteMcp,
+        ToggleMcp,
     ],
     Field(discriminator="type"),
 ]
@@ -182,6 +222,13 @@ class Agents(ServerMessage):
 class Chats(ServerMessage):
     type: Literal["chats"] = "chats"
     chats: list[ChatMeta]
+
+
+class McpServers(ServerMessage):
+    """The current set of registered MCP servers (plugins) for the workspace."""
+
+    type: Literal["mcp_servers"] = "mcp_servers"
+    servers: list[McpServerSpec]
 
 
 class SessionStarted(ServerMessage):

@@ -189,6 +189,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         self._session_id: str | None = None  # latest session id seen (for persistence)
         self._auto_approve: bool = False   # when True, skip prompts for routine edits/commands
         self._interrupted: bool = False    # set while a user-requested stop is in flight
+        self._mcp_servers: dict = {}       # user-registered MCP servers (plugins), {name: config}
 
     @classmethod
     def is_available(cls) -> bool:
@@ -200,6 +201,7 @@ class ClaudeCodeAdapter(AgentAdapter):
     async def start(self, ctx: SessionContext) -> None:
         self._resume = ctx.resume
         self._session_id = ctx.resume
+        self._mcp_servers = ctx.mcp_servers or {}
         self._client = self._make_client()
         await self._client.connect()
 
@@ -224,6 +226,9 @@ class ClaudeCodeAdapter(AgentAdapter):
             # Which settings to load from disk (see _setting_sources); defaults to user,project
             # so we never read or write the workspace's .claude/settings.local.json.
             setting_sources=_setting_sources(),
+            # User-registered plugins (Figma, …). These merge with any the workspace's own
+            # .mcp.json already provides. MCP tools route through can_use_tool like any other.
+            mcp_servers=self._mcp_servers,
             # Disable the OS bash sandbox by default — it can't initialize in the container and
             # would block every Bash command (see _sandbox_enabled).
             sandbox={"enabled": _sandbox_enabled()},
