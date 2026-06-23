@@ -207,6 +207,30 @@ async function main() {
   const um = sent.filter((m) => m.type === "user_message");
   assert.ok(um.length === 1 && /fix the spacing/.test(um[0].text), "dequeued message not dispatched");
   assert.ok(stopBtn.hidden, "stop button should hide when idle");
+
+  // --- Attachments: a stored upload becomes a ready chip and rides along on the next send ---
+  widget.attachments = []; widget._renderContextBar();
+  widget.attachments.push({ id: "u1", name: "spec.md", size: 6, status: "uploading", path: null });
+  widget._renderContextBar();
+  const ctxBar = widget.shadow.querySelector(".ab-context-bar");
+  assert.ok(ctxBar.classList.contains("show") && widget.shadow.querySelector(".ab-chip-file"),
+    "attachment chip not shown while uploading");
+  // While an upload is in flight, sending is blocked.
+  sent.length = 0;
+  widget.input.value = "use the spec";
+  widget._sendMessage();
+  assert.ok(!sent.some((m) => m.type === "user_message"), "must not send while an upload is in flight");
+  // Upload result marks it ready; the path then rides along on the next message and clears.
+  widget._onFileUploaded({ upload_id: "u1", ok: true, name: "spec.md", path: ".agentbridge/uploads/c1/spec.md", size: 6 });
+  assert.equal(widget.attachments[0].status, "ready", "upload result should mark the chip ready");
+  widget.input.value = "use the spec";
+  widget._sendMessage();
+  const umsg = sent.find((m) => m.type === "user_message");
+  assert.ok(umsg && umsg.attachments && umsg.attachments[0] === ".agentbridge/uploads/c1/spec.md",
+    "attachment path not sent with the message");
+  assert.equal(widget.attachments.length, 0, "attachments should clear after send");
+  assert.ok(!ctxBar.classList.contains("show"), "context bar should hide after send");
+
   widget.queue = []; widget._renderQueue(); widget.activeChatId = null;
 
   // Toggling auto-approve drops a system note into the chat (on, then off).
@@ -280,7 +304,7 @@ async function main() {
   assert.equal(widget.root.style.left, "auto", "left should be released for a right anchor");
   assert.equal(widget.root.style.top, "auto", "top should be released for a bottom anchor");
 
-  console.log("OK — widget mounts, streams, renders markdown, resets, drags (panel + bubble), and themes per agent.");
+  console.log("OK — widget mounts, streams, renders markdown, resets, attaches files, drags (panel + bubble), and themes per agent.");
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error("FAIL:", e.message); process.exit(1); });

@@ -11,6 +11,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
+import os
 import re
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -22,6 +25,49 @@ from .git_service import GitError, GitService, PullRequest
 from .store import ChatRecord, ChatStore
 
 Send = Callable[[P.ServerMessage], Awaitable[None]]
+
+
+def _max_upload_bytes() -> int:
+    """Per-file upload cap, in bytes. Override with AGENTBRIDGE_MAX_UPLOAD_MB (default 25)."""
+    try:
+        mb = float(os.environ.get("AGENTBRIDGE_MAX_UPLOAD_MB", "25"))
+    except ValueError:
+        mb = 25.0
+    return int(mb * 1024 * 1024)
+
+
+def _human_size(n: int) -> str:
+    size = float(n)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{int(size)} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{n} B"
+
+
+def _safe_filename(name: str) -> str:
+    """Reduce an arbitrary client-supplied name to a safe basename (no path traversal)."""
+    base = Path(str(name).replace("\\", "/")).name.strip().lstrip(".")
+    base = re.sub(r"[^A-Za-z0-9._ ()+-]", "_", base)
+    return base or "file"
+
+
+def _dedupe_path(path: Path) -> Path:
+    """If ``path`` exists, append ' (1)', ' (2)', … before the extension until it's free."""
+    if not path.exists():
+        return path
+    stem, suffix = path.stem, path.suffix
+    for i in range(1, 1000):
+        candidate = path.with_name(f"{stem} ({i}){suffix}")
+        if not candidate.exists():
+            return candidate
+    return path.with_name(f"{stem} ({uuid4_hex()}){suffix}")
+
+
+def uuid4_hex() -> str:
+    import uuid
+
+    return uuid.uuid4().hex[:8]
 
 
 class Session:
@@ -62,6 +108,7 @@ class Session:
     async def handle(self, msg: P.ClientMessage) -> None:
         handler = {
             "user_message": self._on_user_message,
+            "upload_file": self._on_upload_file,
             "agent_response": self._on_agent_response,
             "stop": self._on_stop,
             "create_pr": self._on_create_pr,
@@ -161,6 +208,7 @@ class Session:
         if first_turn:
             sections.append(self._workspace_map())
         sections.append(self._format_context(msg.context))
+        sections.append(self._format_attachments(msg.attachments))
         preamble = "\n\n".join(s for s in sections if s)
         if preamble:
             text = f"{preamble}\n\n---\n\n{text}"
@@ -211,6 +259,49 @@ class Session:
     async def _on_agent_response(self, msg: P.AgentResponse) -> None:
         if self.adapter is not None:
             await self.adapter.resolve_prompt(msg.request_id, msg.answer)
+
+    async def _on_upload_file(self, msg: P.UploadFile) -> None:
+        """Store an attached file under the workspace's gitignored .agentbridge/uploads/ and
+        return the path the agent can read. Writing is blocking I/O, so it runs off the loop."""
+        async def fail(reason: str) -> None:
+            await self.send(P.FileUploaded(chat_id=self.chat_id, upload_id=msg.upload_id, ok=False, error=reason))
+
+        try:
+            raw = base64.b64decode(msg.data, validate=True)
+        except (binascii.Error, ValueError):
+            await fail("file data was not valid base64")
+            return
+        limit = _max_upload_bytes()
+        if len(raw) > limit:
+            await fail(f"{_human_size(len(raw))} exceeds the {_human_size(limit)} limit")
+            return
+        try:
+            rel = await asyncio.to_thread(self._write_upload, msg.name, raw)
+        except OSError as exc:
+            await fail(str(exc))
+            return
+        await self.send(P.FileUploaded(
+            chat_id=self.chat_id, upload_id=msg.upload_id, ok=True,
+            name=Path(rel).name, path=rel, size=len(raw),
+        ))
+
+    def _write_upload(self, name: str, data: bytes) -> str:
+        """Write upload bytes into .agentbridge/uploads/<chat>/, de-duplicating the filename.
+        Returns the workspace-relative path. Blocking; call via asyncio.to_thread."""
+        uploads = self.workspace / ".agentbridge" / "uploads" / self.chat_id
+        uploads.mkdir(parents=True, exist_ok=True)
+        self._ensure_agentbridge_gitignored()
+        dest = _dedupe_path(uploads / _safe_filename(name))
+        dest.write_bytes(data)
+        return dest.relative_to(self.workspace).as_posix()
+
+    def _ensure_agentbridge_gitignored(self) -> None:
+        """Make the whole .agentbridge/ directory invisible to git so uploads never show as
+        changes or get swept into a PR — without touching the user's own .gitignore. A
+        self-ignoring .gitignore inside the dir does exactly that."""
+        marker = self.workspace / ".agentbridge" / ".gitignore"
+        if not marker.exists():
+            marker.write_text("# Created by AgentBridge — keeps uploads/scratch out of git.\n*\n")
 
     async def _on_stop(self, msg: P.StopAgent) -> None:
         """Cancel the in-flight turn. The running turn loop then ends and emits idle status."""
@@ -295,6 +386,21 @@ class Session:
             )
         elif event.kind == "error":
             await self.send(P.ErrorMessage(message=event.text, chat_id=self.chat_id))
+
+    def _format_attachments(self, attachments: list[str]) -> str:
+        """Point the agent at files the user uploaded for this turn. Only list ones that actually
+        landed under the uploads dir (defends against spoofed/relative paths from the client)."""
+        if not attachments:
+            return ""
+        prefix = ".agentbridge/uploads/"
+        valid = [p for p in attachments if p.startswith(prefix) and (self.workspace / p).is_file()]
+        if not valid:
+            return ""
+        listing = "\n".join(f"- {p}" for p in valid)
+        return (
+            "[Attached files] The user attached these files to this message (paths are relative to "
+            "the workspace root); read them as needed:\n" + listing
+        )
 
     def _workspace_map(self) -> str:
         """A one-time orientation map of the repo so the agent reads the right paths instead of

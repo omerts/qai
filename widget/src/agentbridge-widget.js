@@ -30,6 +30,8 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   var INSPECT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="4"/></svg>';
   var SHIELD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>';
   var STOP_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>';
+  // Paperclip "attach file" icon.
+  var ATTACH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
 
   // Tooltip text for the inspect (crosshair) button, by state.
   var INSPECT_TIP_OFF = "Inspect mode — click, then pick an element on the page to attach it to your next message as context.";
@@ -43,6 +45,20 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   function lsGet(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } }
   function lsSet(k, v) { try { window.localStorage.setItem(k, v); } catch (e) {} }
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(v, hi)); }
+
+  // Read a File as base64 (no data: prefix) for inline upload over the WebSocket.
+  function readFileBase64(file) {
+    return new Promise(function (resolve, reject) {
+      var r = new FileReader();
+      r.onload = function () {
+        var res = String(r.result || "");
+        var comma = res.indexOf(",");
+        resolve(comma >= 0 ? res.slice(comma + 1) : res);
+      };
+      r.onerror = function () { reject(r.error || new Error("couldn't read file")); };
+      r.readAsDataURL(file);
+    });
+  }
 
   function h(tag, attrs, children) {
     var el = document.createElement(tag);
@@ -75,8 +91,10 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this._everConnected = false;
     this._reconnectTimer = null;
     this.pendingElement = null;  // element picked via the inspector, attached to next msg
+    this.attachments = [];       // uploaded files for the next msg: {id, name, size, status, path}
+    this._uploadSeq = 0;         // monotonic id source for correlating upload results
     this.running = false;        // true while the active chat's agent is working
-    this.queue = [];             // follow-ups typed while busy: {text, element}
+    this.queue = [];             // follow-ups typed while busy: {text, element, attachments}
     this._inspecting = false;
     this.autoApprove = lsGet(LS_AUTO) !== "0";  // default ON; "0" = user turned it off
     this._autoOpened = false;
@@ -203,9 +221,18 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.stopBtn.innerHTML = STOP_ICON;
     this.stopBtn.hidden = true;  // only shown while the agent is working
     this.stopBtn.addEventListener("click", function () { self._stopAgent(); });
+    // Attach files: a paperclip that opens a hidden multi-file picker.
+    this.attachBtn = h("button", { class: "ab-attach", title: "Attach files for the agent to read" });
+    this.attachBtn.innerHTML = ATTACH_ICON;
+    this.attachBtn.addEventListener("click", function () { self.fileInput.click(); });
+    this.fileInput = h("input", { type: "file", multiple: "", class: "ab-file-input" });
+    this.fileInput.addEventListener("change", function () {
+      self._uploadFiles(self.fileInput.files);
+      self.fileInput.value = "";   // allow re-picking the same file
+    });
     this.sendBtn = h("button", { class: "ab-send", text: "➤", title: "Send" });
     this.sendBtn.addEventListener("click", function () { self._sendMessage(); });
-    var composer = h("div", { class: "ab-composer" }, [this.input, this.stopBtn, this.sendBtn]);
+    var composer = h("div", { class: "ab-composer" }, [this.attachBtn, this.input, this.stopBtn, this.sendBtn, this.fileInput]);
 
     // Connection banner (shown when not connected to the server)
     this.bannerText = h("span", { class: "ab-banner-text" });
@@ -461,6 +488,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
           + "\nWorkspace reset to its original branch; worktree: " + msg.worktree_path);
         return;
       case "file_changes": return this._isActive(msg) && this._onFileChanges(msg.files);
+      case "file_uploaded": return this._isActive(msg) && this._onFileUploaded(msg);
       case "pr_created": return this._isActive(msg) && this._prLink(msg.url, msg.number);
       case "status": return this._isActive(msg) && this._onStatus(msg.state);
       case "error":
@@ -617,27 +645,43 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     var text = this.input.value.trim();
     if (!text) return;
     if (!this.activeChatId) { this._newChatHint(); return; }
+    if (this.attachments.some(function (a) { return a.status === "uploading"; })) {
+      this._system("Still uploading a file — try again in a moment.");
+      return;
+    }
     this.input.value = "";
+    var element = this.pendingElement || null;
+    var attachments = this._readyAttachmentPaths();
+    this._clearPendingElement();
+    this.attachments = [];
+    this._renderContextBar();
     // Busy? Queue the follow-up instead of erroring; it's sent when the turn finishes.
     if (this.running) {
-      this.queue.push({ text: text, element: this.pendingElement || null });
-      this._clearPendingElement();
+      this.queue.push({ text: text, element: element, attachments: attachments });
       this._renderQueue();
       return;
     }
-    this._dispatchUserMessage(text, this.pendingElement || null);
-    this._clearPendingElement();
+    this._dispatchUserMessage(text, element, attachments);
+  };
+
+  // Workspace-relative paths of attachments that finished uploading (skip in-flight/failed ones).
+  AgentBridgeWidget.prototype._readyAttachmentPaths = function () {
+    return this.attachments
+      .filter(function (a) { return a.status === "ready" && a.path; })
+      .map(function (a) { return a.path; });
   };
 
   // Actually send a user turn to the backend (used for immediate sends and dequeued ones).
-  AgentBridgeWidget.prototype._dispatchUserMessage = function (text, element) {
+  AgentBridgeWidget.prototype._dispatchUserMessage = function (text, element, attachments) {
     this.bridge.addUser(text);
     var context = { page: this._collectPageContext() };
     if (element) context.element = element;
-    this._send({
+    var payload = {
       type: "user_message", chat_id: this.activeChatId, text: text,
       context: context, auto_approve: this.autoApprove,
-    });
+    };
+    if (attachments && attachments.length) payload.attachments = attachments;
+    this._send(payload);
   };
 
   AgentBridgeWidget.prototype._stopAgent = function () {
@@ -653,7 +697,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     if (this.running || !this.queue.length || !this.activeChatId) return;
     var item = this.queue.shift();
     this._renderQueue();
-    this._dispatchUserMessage(item.text, item.element);
+    this._dispatchUserMessage(item.text, item.element, item.attachments);
   };
 
   AgentBridgeWidget.prototype._renderQueue = function () {
@@ -983,28 +1027,97 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     return null;
   };
 
-  // ---- Pending-element chip --------------------------------------------- //
+  // ---- Context bar: pending element + attachment chips ------------------ //
 
   AgentBridgeWidget.prototype._setPendingElement = function (desc) {
     this.pendingElement = desc;
-    this.contextBar.innerHTML = "";
-    var self = this;
-    var label = desc.component ? "‹" + desc.component + "› " + desc.label : desc.label;
-    var chip = h("span", { class: "ab-chip" }, [
-      h("span", { class: "ab-chip-icon", text: "🎯" }),
-      h("span", { class: "ab-chip-text", title: desc.selector, text: label }),
-    ]);
-    var x = h("button", { class: "ab-chip-x", title: "Remove", text: "✕" });
-    x.addEventListener("click", function () { self._clearPendingElement(); });
-    chip.appendChild(x);
-    this.contextBar.appendChild(chip);
-    this.contextBar.classList.add("show");
+    this._renderContextBar();
   };
 
   AgentBridgeWidget.prototype._clearPendingElement = function () {
     this.pendingElement = null;
+    this._renderContextBar();
+  };
+
+  // Render the element chip (if any) plus a chip per pending attachment. Shown only when there's
+  // something to show.
+  AgentBridgeWidget.prototype._renderContextBar = function () {
+    var self = this;
     this.contextBar.innerHTML = "";
-    this.contextBar.classList.remove("show");
+    var any = false;
+
+    var el = this.pendingElement;
+    if (el) {
+      any = true;
+      var label = el.component ? "‹" + el.component + "› " + el.label : el.label;
+      var elChip = h("span", { class: "ab-chip" }, [
+        h("span", { class: "ab-chip-icon", text: "🎯" }),
+        h("span", { class: "ab-chip-text", title: el.selector, text: label }),
+      ]);
+      var elX = h("button", { class: "ab-chip-x", title: "Remove", text: "✕" });
+      elX.addEventListener("click", function () { self._clearPendingElement(); });
+      elChip.appendChild(elX);
+      this.contextBar.appendChild(elChip);
+    }
+
+    this.attachments.forEach(function (att) {
+      any = true;
+      var icon = att.status === "uploading" ? "⏳" : att.status === "error" ? "⚠️" : "📎";
+      var cls = "ab-chip ab-chip-file" + (att.status === "error" ? " error" : "");
+      var chip = h("span", { class: cls }, [
+        h("span", { class: "ab-chip-icon", text: icon }),
+        h("span", { class: "ab-chip-text", title: att.error || att.path || att.name, text: att.name }),
+      ]);
+      var x = h("button", { class: "ab-chip-x", title: "Remove", text: "✕" });
+      x.addEventListener("click", function () { self._removeAttachment(att.id); });
+      chip.appendChild(x);
+      self.contextBar.appendChild(chip);
+    });
+
+    this.contextBar.classList.toggle("show", any);
+  };
+
+  AgentBridgeWidget.prototype._removeAttachment = function (id) {
+    this.attachments = this.attachments.filter(function (a) { return a.id !== id; });
+    this._renderContextBar();
+  };
+
+  // Read each picked file as base64 and upload it; the result (path) comes back via file_uploaded.
+  AgentBridgeWidget.prototype._uploadFiles = function (files) {
+    if (!files || !files.length) return;
+    if (!this.activeChatId) { this._newChatHint(); return; }
+    if (!this.connected) { this._system("Can't upload while disconnected from the agent server."); return; }
+    var self = this;
+    Array.prototype.forEach.call(files, function (file) {
+      var id = "u" + (++self._uploadSeq);
+      var att = { id: id, name: file.name || "file", size: file.size, status: "uploading", path: null };
+      self.attachments.push(att);
+      self._renderContextBar();
+      readFileBase64(file).then(function (b64) {
+        // The chip may have been removed while reading; only send if it's still pending.
+        if (self.attachments.indexOf(att) === -1) return;
+        self._send({ type: "upload_file", chat_id: self.activeChatId, upload_id: id, name: att.name, data: b64 });
+      }).catch(function (e) {
+        att.status = "error"; att.error = (e && e.message) || "couldn't read file";
+        self._renderContextBar();
+      });
+    });
+  };
+
+  AgentBridgeWidget.prototype._onFileUploaded = function (msg) {
+    var att = null;
+    for (var i = 0; i < this.attachments.length; i++) {
+      if (this.attachments[i].id === msg.upload_id) { att = this.attachments[i]; break; }
+    }
+    if (!att) return;   // chip was removed before the result arrived
+    if (msg.ok) {
+      att.status = "ready"; att.path = msg.path;
+      if (msg.name) att.name = msg.name;
+      if (msg.size != null) att.size = msg.size;
+    } else {
+      att.status = "error"; att.error = msg.error || "upload failed";
+    }
+    this._renderContextBar();
   };
 
   // ---- Rendering -------------------------------------------------------- //
@@ -1172,6 +1285,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   AgentBridgeWidget.prototype._setChatActive = function (on) {
     this.prBtn.disabled = !on;
     this.inspectBtn.disabled = !on;
+    this.attachBtn.disabled = !on;
     this.sendBtn.disabled = !on;
     this.input.disabled = !on;
   };

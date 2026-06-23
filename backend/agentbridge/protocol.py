@@ -91,6 +91,23 @@ class UserMessage(BaseModel):
     # When True, the agent auto-approves routine file edits and shell commands for this turn
     # (risky shell commands still prompt). Reflects the widget's auto-approve toggle.
     auto_approve: bool = False
+    # Workspace-relative paths of files the user attached to this turn (previously uploaded via
+    # ``upload_file``). The server points the agent at them in the preamble.
+    attachments: list[str] = Field(default_factory=list)
+
+
+class UploadFile(BaseModel):
+    """A file the user attaches to a chat. The server stores it under the workspace's gitignored
+    ``.agentbridge/uploads/`` so the agent can read it by path without it polluting git or a PR."""
+
+    type: Literal["upload_file"]
+    chat_id: str
+    # Client-generated id echoed back in ``FileUploaded`` so the widget can match the result to
+    # the right pending attachment (uploads are handled concurrently, so order isn't guaranteed).
+    upload_id: str
+    name: str
+    # Base64-encoded file bytes, sent inline over the WebSocket.
+    data: str
 
 
 class AgentResponse(BaseModel):
@@ -131,6 +148,7 @@ ClientMessage = Annotated[
         OpenChat,
         DeleteChat,
         UserMessage,
+        UploadFile,
         AgentResponse,
         StopAgent,
         CreatePR,
@@ -227,6 +245,20 @@ class PRCreated(ServerMessage):
     chat_id: str
     url: str
     number: int | None = None
+
+
+class FileUploaded(ServerMessage):
+    """Result of an ``upload_file``. On success carries the workspace-relative ``path`` the agent
+    can read; on failure carries ``error``. ``upload_id`` ties it to the widget's pending chip."""
+
+    type: Literal["file_uploaded"] = "file_uploaded"
+    chat_id: str
+    upload_id: str
+    ok: bool = True
+    name: str | None = None
+    path: str | None = None
+    size: int | None = None
+    error: str | None = None
 
 
 class Status(ServerMessage):

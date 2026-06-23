@@ -30,6 +30,8 @@ def _init_repo(path: Path) -> None:
 class FakeAdapter(AgentAdapter):
     name = "fake"
     label = "Fake"
+    #: Texts the adapter received, so tests can assert what preamble the server built.
+    received_texts: list[str] = []
 
     @classmethod
     def is_available(cls) -> bool:
@@ -42,6 +44,7 @@ class FakeAdapter(AgentAdapter):
         pass
 
     async def send(self, text: str):
+        type(self).received_texts.append(text)
         (self.workspace / "feature.txt").write_text("new feature\n")
         yield AgentEvent.chunk("Added feature.txt")
         yield AgentEvent.file("feature.txt")
@@ -279,6 +282,72 @@ def test_chat_persistence_and_resume(client):
         assert deleted["chat_id"] == chat_id
         remaining = {c["id"] for c in _recv_until(ws, "chats")["chats"]}
         assert chat_id not in remaining
+
+
+def test_upload_file_stored_and_gitignored(client):
+    """An uploaded file lands under .agentbridge/uploads/<chat>/, the agent can read it by the
+    returned path, and the whole .agentbridge dir is kept out of git."""
+    import base64
+
+    tc, repo, _ = client
+    with tc.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "start_session", "agent": "fake", "title": "feat"})
+        chat_id = _recv_until(ws, "session_started")["chat_id"]
+        ws.send_json({
+            "type": "upload_file", "chat_id": chat_id, "upload_id": "u1",
+            "name": "notes.txt", "data": base64.b64encode(b"hello bytes").decode(),
+        })
+        res = _recv_until(ws, "file_uploaded")
+        assert res["ok"] is True and res["upload_id"] == "u1"
+        assert res["path"].startswith(".agentbridge/uploads/") and res["path"].endswith("notes.txt")
+        assert res["size"] == len(b"hello bytes")
+        assert (repo / res["path"]).read_bytes() == b"hello bytes"
+
+    assert (repo / ".agentbridge" / ".gitignore").is_file()
+    # git must not see the upload (the self-ignoring .gitignore hides the whole dir).
+    porcelain = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True
+    ).stdout
+    assert ".agentbridge" not in porcelain
+
+
+def test_upload_rejected_when_too_large(client, monkeypatch):
+    """Uploads over the size cap are refused with an error result, nothing written."""
+    import base64
+
+    monkeypatch.setenv("AGENTBRIDGE_MAX_UPLOAD_MB", "0.000001")  # ~1 byte
+    tc, repo, _ = client
+    with tc.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "start_session", "agent": "fake", "title": "feat"})
+        chat_id = _recv_until(ws, "session_started")["chat_id"]
+        ws.send_json({
+            "type": "upload_file", "chat_id": chat_id, "upload_id": "big",
+            "name": "big.bin", "data": base64.b64encode(b"x" * 1024).decode(),
+        })
+        res = _recv_until(ws, "file_uploaded")
+        assert res["ok"] is False and "limit" in res["error"]
+
+
+def test_attachments_passed_to_agent(client):
+    """Paths attached to a user_message are surfaced to the agent in the turn preamble."""
+    import base64
+
+    FakeAdapter.received_texts.clear()
+    tc, repo, _ = client
+    with tc.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "start_session", "agent": "fake", "title": "feat"})
+        chat_id = _recv_until(ws, "session_started")["chat_id"]
+        ws.send_json({
+            "type": "upload_file", "chat_id": chat_id, "upload_id": "a1",
+            "name": "spec.md", "data": base64.b64encode(b"# spec").decode(),
+        })
+        path = _recv_until(ws, "file_uploaded")["path"]
+        ws.send_json({
+            "type": "user_message", "chat_id": chat_id, "text": "use the spec",
+            "attachments": [path],
+        })
+        _recv_until(ws, "file_changes")
+    assert any(path in t and "Attached files" in t for t in FakeAdapter.received_texts)
 
 
 def _drain_idle(ws, chat_id, limit=30):
