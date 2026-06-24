@@ -158,10 +158,11 @@ Click the **paperclip** in the composer to attach any files (images, PDFs, data,
 
 Click the **puzzle-piece** button to connect [MCP](https://modelcontextprotocol.io) servers. Add `stdio` (local command) or `http`/`sse` (remote URL) servers, toggle them on/off, or remove them; the set is persisted per workspace. Enabled servers are passed to Claude Code (alongside any the workspace's own `.mcp.json` already provides), so the agent can use their tools. Changes apply to new or restarted chats. _(MCP wiring currently targets the Claude Code agent.)_
 
-Two one-click **Figma** presets are included:
+Three one-click **Figma** presets are included:
 
-- **Figma (Dev Mode)** — the official local server from the Figma desktop app (Preferences → _Enable Dev Mode MCP server_), at `http://127.0.0.1:3845/mcp`. ⚠️ If the backend runs in **Docker**, `127.0.0.1` is the container, not your host — change the host to `host.docker.internal:3845` (and run the container with `--add-host=host.docker.internal:host-gateway`).
-- **Figma (API key)** — a headless server via `npx figma-developer-mcp` plus a [Figma API token](https://help.figma.com/hc/en-us/articles/8085703771159). No desktop app needed and it works inside Docker; just replace `YOUR_FIGMA_API_KEY` in the prefilled command.
+- **Figma** _(recommended)_ — Figma's hosted server at `https://mcp.figma.com/mcp`. On first use the MCP client opens your browser for Figma's OAuth login — no API key, no desktop app. (The browser opens on the machine running the backend, so this is smoothest when the backend runs **directly on your machine** rather than in Docker.)
+- **Figma (Dev Mode)** — the local server from the Figma desktop app (Preferences → _Enable Dev Mode MCP server_), at `http://127.0.0.1:3845/mcp`. ⚠️ If the backend runs in **Docker**, `127.0.0.1` is the container, not your host — change the host to `host.docker.internal:3845` (and run the container with `--add-host=host.docker.internal:host-gateway`).
+- **Figma (API key)** — a headless server via `npx figma-developer-mcp` plus a [Figma API token](https://help.figma.com/hc/en-us/articles/8085703771159). No desktop app, no browser — works inside Docker; just replace `YOUR_FIGMA_API_KEY` in the prefilled command.
 
 ### Multiple chats, history & resume
 
