@@ -161,6 +161,10 @@
 /* Hover tooltip for icon buttons (text from the data-tip attribute). Anchored to the
    button's right edge so it expands leftward and stays inside the panel's clipped box. */
 .ab-tip { position: relative; }
+/* Lift the hovered tip's host above the sibling rows while its tooltip is showing. Some hosts
+   create a stacking context on hover (e.g. the New chat button's :hover filter), which would
+   otherwise trap the tooltip's z-index locally and let later content paint over it. */
+.ab-tip[data-tip]:hover, .ab-tip[data-tip]:focus-visible { z-index: 2147483647; }
 .ab-tip[data-tip]:hover::after, .ab-tip[data-tip]:focus-visible::after {
   content: attr(data-tip);
   position: absolute; top: calc(100% + 6px); right: 0;
@@ -170,7 +174,7 @@
   padding: 6px 9px; font-size: 11px; line-height: 1.4;
   white-space: normal; text-align: left;
   box-shadow: 0 8px 24px rgba(0,0,0,.4);
-  z-index: 20; pointer-events: none;
+  z-index: 2147483647; pointer-events: none;
 }
 /* The controls-row icons sit left-of-center (branch label takes the right via margin-left:auto),
    so a tip anchored to the button would spill off the panel's left edge. Anchor these to the row
