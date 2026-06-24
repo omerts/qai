@@ -39,9 +39,17 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   var INSPECT_TIP_OFF = "Inspect mode — click, then pick an element on the page to attach it to your next message as context.";
   var INSPECT_TIP_ON = "Inspect mode ON — click an element on the page to attach it (Esc, or click here, to cancel).";
 
-  // Quick-add preset for Figma's local Dev Mode MCP server (Figma desktop app → Preferences →
-  // "Enable Dev Mode MCP server"). Prefilled into the form so the user can tweak before saving.
-  var FIGMA_PRESET = { name: "figma", transport: "sse", url: "http://127.0.0.1:3845/sse" };
+  // Quick-add presets for Figma, prefilled into the form so the user can tweak before saving.
+  // 1) Official local Dev Mode MCP server (Figma desktop app → Preferences → "Enable Dev Mode MCP
+  //    server"). Streamable HTTP at /mcp (the old /sse endpoint is deprecated). Note: if the
+  //    backend runs in Docker, 127.0.0.1 is the container — use host.docker.internal:3845 instead.
+  var FIGMA_PRESET = { name: "figma", transport: "http", url: "http://127.0.0.1:3845/mcp" };
+  // 2) Headless server via the Framelink package + a Figma API key — works without the desktop
+  //    app (and inside Docker). Replace YOUR_FIGMA_API_KEY with a token from Figma → Settings.
+  var FIGMA_KEY_PRESET = {
+    name: "figma", transport: "stdio", command: "npx",
+    args: ["-y", "figma-developer-mcp", "--figma-api-key=YOUR_FIGMA_API_KEY", "--stdio"],
+  };
 
   var LS_AGENT = "agentbridge:agent";
   var LS_CHAT = "agentbridge:activeChat";
@@ -414,11 +422,15 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       "Connect MCP servers for the agent to use. Changes apply to new or restarted chats." });
     this.pluginsList = h("div", { class: "ab-plugins-list" });
     // Quick-add presets + a manual "Add server" toggle.
-    var figma = h("button", { class: "ab-btn ab-plugins-preset", text: "+ Figma" });
+    var figma = h("button", { class: "ab-btn ab-plugins-preset", text: "+ Figma (Dev Mode)",
+      title: "Figma desktop app's Dev Mode MCP server (http://127.0.0.1:3845/mcp)" });
     figma.addEventListener("click", function () { self._openPluginForm(FIGMA_PRESET); });
+    var figmaKey = h("button", { class: "ab-btn ab-plugins-preset", text: "+ Figma (API key)",
+      title: "Headless Figma MCP via npx + a Figma API key — works without the desktop app / in Docker" });
+    figmaKey.addEventListener("click", function () { self._openPluginForm(FIGMA_KEY_PRESET); });
     var addBtn = h("button", { class: "ab-btn ab-plugins-add", text: "+ Add server" });
     addBtn.addEventListener("click", function () { self._openPluginForm(null); });
-    var presets = h("div", { class: "ab-plugins-presets" }, [figma, addBtn]);
+    var presets = h("div", { class: "ab-plugins-presets" }, [figma, figmaKey, addBtn]);
     this.pluginForm = h("div", { class: "ab-plugin-form" });   // populated by _openPluginForm
     this.pluginsPanel = h("div", { class: "ab-plugins" }, [head, intro, this.pluginsList, presets, this.pluginForm]);
   };

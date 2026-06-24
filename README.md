@@ -18,7 +18,7 @@ AgentBridge drops a chat bubble into any web app. You describe a change (optiona
 
 1. **Backend** (`backend/`) — a FastAPI server that orchestrates coding agents against your local repo and handles git/PR.
 2. **Widget** (`widget/`) — a Shadow-DOM chat bubble you embed with a single `<script>` tag. The shell is plain DOM; the message thread renders with [assistant-ui](https://www.assistant-ui.com/) (React).
-3. **Session workflow** — chat while the agent edits your workspace in place, then click **Create PR** to commit *only the agent's edits* onto a fresh branch and open a pull request — your other uncommitted work is left untouched.
+3. **Session workflow** — chat while the agent edits your workspace in place, then click **Create PR** to commit _only the agent's edits_ onto a fresh branch and open a pull request — your other uncommitted work is left untouched.
 
 > **Scope:** local, single developer. No auth/multi-tenancy. PRs target GitHub. Claude Code and Cursor are fully wired; Aider and Copilot are stubs behind the same adapter interface (they appear in the picker as unavailable until implemented).
 
@@ -56,17 +56,17 @@ Open your app, click the chat bubble, pick an agent, and start. Framework snippe
 
 ### `.env` essentials
 
-| Variable | Required | Purpose |
-| --- | --- | --- |
-| `WORKSPACE` | ✅ | Absolute path to the git repo the agent edits (bind-mounted at `/workspace`). |
-| `CLAUDE_CODE_OAUTH_TOKEN` | one of | Claude subscription token from `claude setup-token` (no API billing). |
-| `ANTHROPIC_API_KEY` | one of | Use API billing instead. If both are set, the API key wins. |
-| `GITHUB_TOKEN` / `GH_TOKEN` | for PRs | Token with `repo` scope — used to push and open PRs over HTTPS (no ssh needed). |
-| `PUID` / `PGID` | optional | Run as your host user so the agent's edits stay owned by you. Defaults to `1000:1000`; set to your `id -u`/`id -g` if different. |
+| Variable                    | Required | Purpose                                                                                                                          |
+| --------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `WORKSPACE`                 | ✅       | Absolute path to the git repo the agent edits (bind-mounted at `/workspace`).                                                    |
+| `CLAUDE_CODE_OAUTH_TOKEN`   | one of   | Claude subscription token from `claude setup-token` (no API billing).                                                            |
+| `ANTHROPIC_API_KEY`         | one of   | Use API billing instead. If both are set, the API key wins.                                                                      |
+| `GITHUB_TOKEN` / `GH_TOKEN` | for PRs  | Token with `repo` scope — used to push and open PRs over HTTPS (no ssh needed).                                                  |
+| `PUID` / `PGID`             | optional | Run as your host user so the agent's edits stay owned by you. Defaults to `1000:1000`; set to your `id -u`/`id -g` if different. |
 
 See [`.env.example`](.env.example) for the full list (port, worktree/state dirs, Claude setting sources, sandbox toggle).
 
-> **Auth without an API key:** run `claude setup-token` on your host and put the result in `CLAUDE_CODE_OAUTH_TOKEN` (leave `ANTHROPIC_API_KEY` empty). If you run the backend *directly* on a machine already logged into Claude Code, no token is needed — keep `ANTHROPIC_API_KEY` unset so it reuses your login instead of API billing.
+> **Auth without an API key:** run `claude setup-token` on your host and put the result in `CLAUDE_CODE_OAUTH_TOKEN` (leave `ANTHROPIC_API_KEY` empty). If you run the backend _directly_ on a machine already logged into Claude Code, no token is needed — keep `ANTHROPIC_API_KEY` unset so it reuses your login instead of API billing.
 
 > **Reclaiming file ownership:** if an earlier run (as root) left root-owned files in your repo, fix them once with `sudo chown -R $(id -u):$(id -g) /path/to/your/repo`, and make sure `PUID`/`PGID` match your user.
 
@@ -92,28 +92,28 @@ cd widget && npm install && npm run build   # produces widget/dist/agentbridge-w
 
 Configuration (all optional, via env vars):
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `AGENTBRIDGE_WORKSPACE` | cwd | Repo the agent operates on |
-| `AGENTBRIDGE_HOST` | `127.0.0.1` | Bind host |
-| `AGENTBRIDGE_PORT` | `8000` | Bind port |
-| `AGENTBRIDGE_AGENT` | `claude-code` | Default agent for new chats |
-| `AGENTBRIDGE_WORKTREE_DIR` | `<repo>/../.agentbridge-worktrees` | Where branch worktrees are created |
-| `AGENTBRIDGE_STATE_DIR` | `~/.agentbridge` | Where chat history is persisted (per workspace) |
-| `AGENTBRIDGE_CLAUDE_SETTING_SOURCES` | `user,project` | Which Claude Code settings to load from disk (`local` omitted so no `.claude` files are written into your workspace; empty = CLI default) |
-| `GITHUB_TOKEN` / `GH_TOKEN` | — | Push + PR over HTTPS (falls back to `gh auth token`) |
-| `GITHUB_REPOSITORY` | — | `owner/name` override when your `origin` remote can't be parsed (e.g. a custom ssh host alias) |
+| Variable                             | Default                            | Purpose                                                                                                                                   |
+| ------------------------------------ | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `AGENTBRIDGE_WORKSPACE`              | cwd                                | Repo the agent operates on                                                                                                                |
+| `AGENTBRIDGE_HOST`                   | `127.0.0.1`                        | Bind host                                                                                                                                 |
+| `AGENTBRIDGE_PORT`                   | `8000`                             | Bind port                                                                                                                                 |
+| `AGENTBRIDGE_AGENT`                  | `claude-code`                      | Default agent for new chats                                                                                                               |
+| `AGENTBRIDGE_WORKTREE_DIR`           | `<repo>/../.agentbridge-worktrees` | Where branch worktrees are created                                                                                                        |
+| `AGENTBRIDGE_STATE_DIR`              | `~/.agentbridge`                   | Where chat history is persisted (per workspace)                                                                                           |
+| `AGENTBRIDGE_CLAUDE_SETTING_SOURCES` | `user,project`                     | Which Claude Code settings to load from disk (`local` omitted so no `.claude` files are written into your workspace; empty = CLI default) |
+| `GITHUB_TOKEN` / `GH_TOKEN`          | —                                  | Push + PR over HTTPS (falls back to `gh auth token`)                                                                                      |
+| `GITHUB_REPOSITORY`                  | —                                  | `owner/name` override when your `origin` remote can't be parsed (e.g. a custom ssh host alias)                                            |
 
 ---
 
 ## Coding agents
 
-| Agent | Driver | Status |
-| --- | --- | --- |
+| Agent       | Driver                                 | Status         |
+| ----------- | -------------------------------------- | -------------- |
 | Claude Code | `claude-agent-sdk` (`ClaudeSDKClient`) | ✅ implemented |
-| Cursor | `cursor-agent` CLI (`stream-json`) | ✅ implemented |
-| Aider | Python `Coder` API | 🚧 stub |
-| Copilot | `gh copilot` / Copilot CLI | 🚧 stub |
+| Cursor      | `cursor-agent` CLI (`stream-json`)     | ✅ implemented |
+| Aider       | Python `Coder` API                     | 🚧 stub        |
+| Copilot     | `gh copilot` / Copilot CLI             | 🚧 stub        |
 
 Each agent implements the `AgentAdapter` contract in [`backend/agentbridge/agents/base.py`](backend/agentbridge/agents/base.py). Add a new agent by writing one adapter and registering it in `agents/registry.py`.
 
@@ -125,7 +125,7 @@ Each agent implements the `AgentAdapter` contract in [`backend/agentbridge/agent
 
 ### Workspace settings
 
-Agents run *in your workspace* and honor its own configuration:
+Agents run _in your workspace_ and honor its own configuration:
 
 - **Claude Code** loads the workspace's `.claude/settings.json`, `.mcp.json`, hooks, custom agents, and `CLAUDE.md`, plus your user settings (`~/.claude`; in Docker, the `agentbridge-claude-home` volume at `/home/app/.claude`). It deliberately omits the `local` source (`.claude/settings.local.json`) so AgentBridge never reads or **creates a `.claude` file in your workspace** — approvals flow through the Allow/Deny card instead. Tune with `AGENTBRIDGE_CLAUDE_SETTING_SOURCES`.
 - **Cursor** picks up `.cursor/rules`, `.cursorrules`, and `AGENTS.md` automatically.
@@ -148,7 +148,7 @@ With every message the widget attaches lightweight **browser context**: the curr
 
 - **Route → page file** (e.g. `/auth/login` → `app/auth/login/page.tsx`) for Next.js App/Pages Router, honoring route groups and dynamic segments.
 - **Source hint → repo file** from React's dev source info, mapped to a workspace-relative path.
-- **Component chain → your component**, walking the React fiber tree to skip library wrappers (e.g. Ant Design's `Wave`) and land on the first component defined in *your* repo.
+- **Component chain → your component**, walking the React fiber tree to skip library wrappers (e.g. Ant Design's `Wave`) and land on the first component defined in _your_ repo.
 
 ### Attaching files
 
@@ -156,7 +156,12 @@ Click the **paperclip** in the composer to attach any files (images, PDFs, data,
 
 ### Plugins (MCP servers)
 
-Click the **puzzle-piece** button to connect [MCP](https://modelcontextprotocol.io) servers — e.g. **Figma** (one-click preset for the Figma desktop app's Dev Mode MCP server). Add `stdio` (local command) or `http`/`sse` (remote URL) servers, toggle them on/off, or remove them; the set is persisted per workspace. Enabled servers are passed to Claude Code (alongside any the workspace's own `.mcp.json` already provides), so the agent can use their tools. Changes apply to new or restarted chats. *(MCP wiring currently targets the Claude Code agent.)*
+Click the **puzzle-piece** button to connect [MCP](https://modelcontextprotocol.io) servers. Add `stdio` (local command) or `http`/`sse` (remote URL) servers, toggle them on/off, or remove them; the set is persisted per workspace. Enabled servers are passed to Claude Code (alongside any the workspace's own `.mcp.json` already provides), so the agent can use their tools. Changes apply to new or restarted chats. _(MCP wiring currently targets the Claude Code agent.)_
+
+Two one-click **Figma** presets are included:
+
+- **Figma (Dev Mode)** — the official local server from the Figma desktop app (Preferences → _Enable Dev Mode MCP server_), at `http://127.0.0.1:3845/mcp`. ⚠️ If the backend runs in **Docker**, `127.0.0.1` is the container, not your host — change the host to `host.docker.internal:3845` (and run the container with `--add-host=host.docker.internal:host-gateway`).
+- **Figma (API key)** — a headless server via `npx figma-developer-mcp` plus a [Figma API token](https://help.figma.com/hc/en-us/articles/8085703771159). No desktop app needed and it works inside Docker; just replace `YOUR_FIGMA_API_KEY` in the prefilled command.
 
 ### Multiple chats, history & resume
 
