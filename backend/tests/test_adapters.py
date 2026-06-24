@@ -7,6 +7,7 @@ import pytest
 from agentbridge import protocol as P
 from agentbridge.agents.aider import AiderAdapter
 from agentbridge.agents.base import AgentAdapter, AgentEvent, Capabilities, SessionContext
+from agentbridge.agents.claude_code import ClaudeCodeAdapter
 from agentbridge.agents.copilot import CopilotAdapter
 from agentbridge.sessions import Session
 from agentbridge.store import ChatStore
@@ -14,6 +15,34 @@ from agentbridge.store import ChatStore
 
 async def _noop() -> None:
     return None
+
+
+class _FakeMsg:
+    """Minimal stand-in for an SDK init message (no SDK install needed)."""
+
+    def __init__(self, subtype, data):
+        self.subtype = subtype
+        self.data = data
+
+
+def test_mcp_status_events_flags_unconnected_servers(tmp_path: Path):
+    adapter = ClaudeCodeAdapter(tmp_path)
+    msg = _FakeMsg("init", {"mcp_servers": [
+        {"name": "figma", "status": "failed"},
+        {"name": "db", "status": "connected"},
+    ]})
+    events = adapter._mcp_status_events(msg)
+    assert len(events) == 1
+    assert "figma" in events[0].text and events[0].stream == "stderr"
+
+
+def test_mcp_status_events_ignores_non_init_and_healthy(tmp_path: Path):
+    adapter = ClaudeCodeAdapter(tmp_path)
+    # Non-init messages are ignored entirely.
+    assert adapter._mcp_status_events(_FakeMsg("assistant", {})) == []
+    # All-connected init produces no warnings.
+    healthy = _FakeMsg("init", {"mcp_servers": [{"name": "figma", "status": "connected"}]})
+    assert adapter._mcp_status_events(healthy) == []
 
 
 def _make_session(tmp_path: Path, send, agent: str = "fake") -> Session:

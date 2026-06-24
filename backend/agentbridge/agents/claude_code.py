@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import logging
 import os
 import re
 import uuid
@@ -30,6 +31,8 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Callable
 
 from .base import AgentAdapter, AgentEvent, Capabilities, SessionContext
+
+_log = logging.getLogger("agentbridge")
 
 # Which settings the Claude Code CLI should load from disk. In ``--print`` (SDK) mode the CLI
 # does NOT read filesystem settings unless told to, so we opt in explicitly: this is what
@@ -233,6 +236,13 @@ class ClaudeCodeAdapter(AgentAdapter):
             # would block every Bash command (see _sandbox_enabled).
             sandbox={"enabled": _sandbox_enabled()},
         )
+        # Make MCP wiring diagnosable: log which plugins we hand the SDK (names + transport only,
+        # never the args/headers/env that may carry tokens).
+        if self._mcp_servers:
+            summary = {n: (c.get("type") or "stdio") for n, c in self._mcp_servers.items()}
+            _log.info("Claude session starting with MCP servers: %s", summary)
+        else:
+            _log.info("Claude session starting with no user MCP servers configured.")
         return ClaudeSDKClient(options=options)
 
     def resume_handle(self) -> str | None:
@@ -336,6 +346,8 @@ class ClaudeCodeAdapter(AgentAdapter):
                     sid = getattr(message, "session_id", None)
                     if sid:
                         self._session_id = sid
+                    for event in self._mcp_status_events(message):
+                        await queue.put(event)
                     async for event in self._translate(message):
                         await queue.put(event)
             except Exception as exc:  # noqa: BLE001
@@ -357,6 +369,31 @@ class ClaudeCodeAdapter(AgentAdapter):
             await task
             self._queue = None
         yield AgentEvent.done()
+
+    def _mcp_status_events(self, message) -> list[AgentEvent]:
+        """The SDK's init message reports each MCP server's connection status. Log it and, for any
+        server that didn't connect, surface a note so a misconfigured/unauthenticated plugin is
+        visible instead of its tools just silently never appearing. Only acts on the init message;
+        defensive against SDK shape changes."""
+        if getattr(message, "subtype", None) != "init":
+            return []
+        data = getattr(message, "data", None) or {}
+        servers = data.get("mcp_servers") if isinstance(data, dict) else None
+        if not isinstance(servers, list) or not servers:
+            return []
+        _log.info("Claude session MCP server status: %s", servers)
+        events: list[AgentEvent] = []
+        for s in servers:
+            if not isinstance(s, dict):
+                continue
+            status = str(s.get("status", "")).lower()
+            if status and status not in ("connected", "ok", "ready"):
+                events.append(AgentEvent.chunk(
+                    f"⚠️ MCP server '{s.get('name')}' did not connect (status: {s.get('status')}). "
+                    "Its tools won't be available this turn.\n",
+                    stream="stderr",
+                ))
+        return events
 
     async def _translate(self, message) -> AsyncIterator[AgentEvent]:
         """Map one SDK message to zero or more AgentEvents (duck-typed across versions).
