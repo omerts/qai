@@ -135,6 +135,7 @@
   padding: 8px 12px;
   border-bottom: 1px solid var(--ab-border);
   flex-wrap: wrap;
+  position: relative;   /* positioning context for the icon-button tooltips below */
 }
 .ab-select, .ab-btn {
   font: inherit; font-size: 12px;
@@ -170,6 +171,13 @@
   white-space: normal; text-align: left;
   box-shadow: 0 8px 24px rgba(0,0,0,.4);
   z-index: 20; pointer-events: none;
+}
+/* The controls-row icons sit left-of-center (branch label takes the right via margin-left:auto),
+   so a tip anchored to the button would spill off the panel's left edge. Anchor these to the row
+   itself (right edge, capped to the row width) so they always stay inside, whatever the width. */
+.ab-controls .ab-tip { position: static; }
+.ab-controls .ab-tip[data-tip]:hover::after, .ab-controls .ab-tip[data-tip]:focus-visible::after {
+  left: auto; right: 12px; max-width: calc(100% - 24px);
 }
 
 /* Pending attached-element chip */
