@@ -43,6 +43,9 @@ class ChatRecord:
     updated_at: str = field(default_factory=_now)
     base_branch: str | None = None
     target_branch: str | None = None
+    #: The chat's dedicated branch — the agent works in a private git worktree on this branch, so
+    #: chats run in parallel without touching each other or the workspace.
+    worktree_branch: str | None = None
     #: Agent-native handle used to resume the conversation (Claude session id / Cursor chat id).
     resume_id: str | None = None
     #: Renderable transcript entries (see ``Session`` for the kinds it writes).

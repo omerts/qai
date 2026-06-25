@@ -178,9 +178,15 @@ Three one-click **Figma** presets are included:
 - **Figma (Dev Mode)** — the local server from the Figma desktop app (Preferences → _Enable Dev Mode MCP server_), at `http://127.0.0.1:3845/mcp`. ⚠️ If the backend runs in **Docker**, `127.0.0.1` is the container, not your host — change the host to `host.docker.internal:3845` (and run the container with `--add-host=host.docker.internal:host-gateway`).
 - **Figma (API key)** — a headless server via `npx figma-developer-mcp` plus a [Figma API token](https://help.figma.com/hc/en-us/articles/8085703771159). No desktop app, no browser — works inside Docker; just replace `YOUR_FIGMA_API_KEY` in the prefilled command.
 
-### Multiple chats, history & resume
+### Multiple simultaneous chats (parallel, with a live preview)
 
-One connection runs many chats (**+** to start, **☰** to browse/reopen/delete). Transcripts persist on the backend (`AGENTBRIDGE_STATE_DIR`, per workspace) and survive refreshes and restarts. Reopening a chat **resumes the agent's context** (Claude via its `resume` id, Cursor via `--resume`). Because every chat edits the same workspace, agent turns are **serialized** — one at a time.
+One connection runs many chats (**+** to start, **☰** to browse/reopen/delete). Transcripts persist on the backend (`AGENTBRIDGE_STATE_DIR`, per workspace) and survive refreshes and restarts. Reopening a chat **resumes the agent's context** (Claude via its `resume` id, Cursor via `--resume`).
+
+- **True parallelism.** Each chat runs its agent in its **own git worktree** (a private branch + working dir), so chats run **at the same time** without stepping on each other. The chat list shows a pulsing dot for any chat that's currently working.
+- **One live preview.** Your dev server watches the workspace, which can only mirror one chat at a time. Click **Go live** on a chat to make the workspace reflect *its* changes (hot-reload); a **● Live** badge marks it. Switching reverts the previous chat's overlay and applies the new one. The first chat goes live automatically, so single-chat use feels instant.
+- **Create PR** commits the chat's worktree branch and opens the PR — nothing to relocate, and one chat's edits never leak into another's PR.
+
+> Caveat: only one chat can be previewed (live) at a time, and the live overlay is scoped to the agent's files — manual edits you make to the *same* files a previewed chat changed may be reverted when switching. Across a reconnect the in-memory live state resets.
 
 ### Widget version
 

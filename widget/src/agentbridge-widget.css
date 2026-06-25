@@ -328,8 +328,18 @@
 .ab-chat-item:hover { background: var(--ab-surface); }
 .ab-chat-item.active { background: var(--ab-surface); border-left: 3px solid var(--ab-accent); }
 .ab-chat-main { flex: 1; min-width: 0; }
+.ab-chat-title-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .ab-chat-title { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ab-chat-meta { font-size: 11px; color: var(--ab-muted); }
+/* Pulsing dot on a chat that's currently working (any chat, not just the open one) */
+.ab-chat-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ab-accent); animation: ab-pulse 1.2s ease-in-out infinite; }
+/* Go-live toggle per chat */
+.ab-chat-live {
+  flex: none; border: 1px solid var(--ab-border); background: var(--ab-bg); color: var(--ab-muted);
+  border-radius: 999px; font-size: 11px; padding: 2px 8px; cursor: pointer;
+}
+.ab-chat-live:hover { color: var(--ab-fg); border-color: var(--ab-accent); }
+.ab-chat-live.on { color: #16a34a; border-color: #16a34a; font-weight: 600; }
 .ab-chat-del { border: none; background: none; cursor: pointer; color: var(--ab-muted); font-size: 13px; padding: 4px; opacity: .6; }
 .ab-chat-del:hover { opacity: 1; }
 .ab-msg { max-width: 88%; min-width: 0; padding: 8px 11px; border-radius: 12px; font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }

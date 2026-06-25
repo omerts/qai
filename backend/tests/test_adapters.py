@@ -9,6 +9,7 @@ from agentbridge.agents.aider import AiderAdapter
 from agentbridge.agents.base import AgentAdapter, AgentEvent, Capabilities, SessionContext
 from agentbridge.agents.claude_code import ClaudeCodeAdapter
 from agentbridge.agents.copilot import CopilotAdapter
+from agentbridge.agents import registry
 from agentbridge.sessions import Session
 from agentbridge.store import ChatStore
 
@@ -102,9 +103,9 @@ def _make_session(tmp_path: Path, send, agent: str = "fake") -> Session:
         send=send,
         github_token=None,
         store=store,
-        turn_lock=asyncio.Lock(),
         notify_chats=_noop,
         mcp_for_sdk=dict,
+        live_mirror=lambda *a: _noop(),
     )
 
 
@@ -214,38 +215,38 @@ class FakeAdapter(AgentAdapter):
         pass
 
 
-async def test_session_edits_in_place_without_branching(tmp_path: Path, monkeypatch):
+async def test_session_edits_in_its_own_worktree(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("AGENTBRIDGE_WORKTREE_DIR", str(tmp_path.parent / "wt"))
     monkeypatch.setenv("AGENTBRIDGE_STATE_DIR", str(tmp_path.parent / "state"))
     _init_repo(tmp_path)
+    monkeypatch.setitem(registry._ADAPTERS, "fake", FakeAdapter)
     sent: list[P.ServerMessage] = []
 
     async def send(m: P.ServerMessage) -> None:
         sent.append(m)
 
-    session = _make_session(tmp_path, send)
-    session.adapter = FakeAdapter(tmp_path)  # bypass registry; pretend the adapter started
-
+    session = _make_session(tmp_path, send)  # not live (direct session, no ChatHub)
     await session.handle(P.UserMessage(type="user_message", chat_id=session.chat_id, text="make a file"))
 
     types = [m.type for m in sent]
-    assert "agent_chunk" in types
-    assert "file_changes" in types
-    # The agent edits in place on the current branch — no branch suggestion or auto-branching.
-    assert "branch_suggested" not in types
+    assert "agent_chunk" in types and "file_changes" in types
     assert "branch_created" not in types
-    assert session.git.current_branch() == "main"
-    assert (tmp_path / "agent_made_this.txt").exists()  # edit is live in the workspace
-    # The turn was persisted to the transcript.
+    # The agent edited its private worktree — the workspace is untouched (this session isn't live).
+    assert session.worktree_path is not None
+    assert (session.worktree_path / "agent_made_this.txt").exists()
+    assert not (tmp_path / "agent_made_this.txt").exists()
+    assert not session.repo_git.has_uncommitted_changes()
+    assert session.repo_git.current_branch() == "main"
     kinds = [e["kind"] for e in session.record.transcript]
     assert "user" in kinds and "agent" in kinds
 
 
-async def test_session_create_pr_resets_workspace(tmp_path: Path, monkeypatch):
+async def test_session_create_pr_from_worktree(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("AGENTBRIDGE_WORKTREE_DIR", str(tmp_path.parent / "wt"))
     monkeypatch.setenv("AGENTBRIDGE_STATE_DIR", str(tmp_path.parent / "state"))
     _init_repo(tmp_path)
+    monkeypatch.setitem(registry._ADAPTERS, "fake", FakeAdapter)
 
-    # Don't hit the network: stub push + the GitHub PR call.
     from agentbridge import git_service
 
     monkeypatch.setattr(git_service.GitService, "push", lambda self, *a, **k: None)
@@ -261,18 +262,17 @@ async def test_session_create_pr_resets_workspace(tmp_path: Path, monkeypatch):
         sent.append(m)
 
     session = _make_session(tmp_path, send)
-    session.adapter = FakeAdapter(tmp_path)
     await session.handle(P.UserMessage(type="user_message", chat_id=session.chat_id, text="make a file"))
-    assert (tmp_path / "agent_made_this.txt").exists()
+    assert (session.worktree_path / "agent_made_this.txt").exists()
 
     await session.handle(P.CreatePR(type="create_pr", chat_id=session.chat_id, title="Add a file"))
 
     types = [m.type for m in sent]
     assert "branch_created" in types and "pr_created" in types
-    # The edits were relocated onto the branch worktree and the workspace was reset clean.
-    assert not (tmp_path / "agent_made_this.txt").exists()
-    assert session.git.current_branch() == "main"
-    assert not session.git.has_uncommitted_changes()
+    # The change was committed on the chat's branch (in its worktree); the workspace is untouched.
+    assert session.git.current_branch() == session.record.worktree_branch
+    assert not session.git.has_uncommitted_changes()   # committed
+    assert session.repo_git.current_branch() == "main"
 
 
 def test_pr_meta_drops_agent_filler(tmp_path: Path, monkeypatch):
@@ -300,14 +300,14 @@ def test_pr_meta_drops_agent_filler(tmp_path: Path, monkeypatch):
 
 
 async def test_session_pr_failure_preserves_changes_then_retry_succeeds(tmp_path: Path, monkeypatch):
-    """The reported bug: a failed PR must NOT lose the agent's work. The workspace is left intact
-    and a retry succeeds."""
+    """A failed PR must NOT lose the agent's work: the change stays in the chat's worktree and a
+    retry succeeds (even though the first attempt already committed before push failed)."""
     monkeypatch.setenv("AGENTBRIDGE_WORKTREE_DIR", str(tmp_path.parent / "wt"))
     monkeypatch.setenv("AGENTBRIDGE_STATE_DIR", str(tmp_path.parent / "state"))
     _init_repo(tmp_path)
+    monkeypatch.setitem(registry._ADAPTERS, "fake", FakeAdapter)
     from agentbridge import git_service
 
-    # Push fails the first time (e.g. auth/network), succeeds the second.
     calls = {"push": 0}
 
     def flaky_push(self, *a, **k):
@@ -327,21 +327,18 @@ async def test_session_pr_failure_preserves_changes_then_retry_succeeds(tmp_path
         sent.append(m)
 
     session = _make_session(tmp_path, send)
-    session.adapter = FakeAdapter(tmp_path)
     await session.handle(P.UserMessage(type="user_message", chat_id=session.chat_id, text="make a file"))
-    assert (tmp_path / "agent_made_this.txt").exists()
+    wt_file = session.worktree_path / "agent_made_this.txt"
+    assert wt_file.exists()
 
-    # Attempt #1 fails — the change MUST still be in the workspace, and still tracked for retry.
+    # Attempt #1 fails — the change MUST still be in the worktree, with a commit ready to retry.
     await session.handle(P.CreatePR(type="create_pr", chat_id=session.chat_id, title="Add a file"))
     assert "pr_created" not in [m.type for m in sent]
     assert any(m.type == "error" for m in sent)
-    assert (tmp_path / "agent_made_this.txt").exists(), "a failed PR must not lose the agent's work"
-    assert session.git.is_path_dirty("agent_made_this.txt")
-    assert "agent_made_this.txt" in session.record.touched
+    assert wt_file.exists(), "a failed PR must not lose the agent's work"
+    assert session._has_commits_ahead()   # committed locally, just not pushed
 
-    # Attempt #2 succeeds — now the workspace is reset and the PR is created.
+    # Attempt #2 succeeds.
     sent.clear()
     await session.handle(P.CreatePR(type="create_pr", chat_id=session.chat_id, title="Add a file"))
     assert "pr_created" in [m.type for m in sent]
-    assert not (tmp_path / "agent_made_this.txt").exists()
-    assert not session.git.has_uncommitted_changes()

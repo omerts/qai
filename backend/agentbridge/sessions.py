@@ -82,9 +82,9 @@ class Session:
         send: Send,
         github_token: str | None,
         store: ChatStore,
-        turn_lock: asyncio.Lock,
         notify_chats: Callable[[], Awaitable[None]],
         mcp_for_sdk: Callable[[], dict],
+        live_mirror: Callable[[str, list[str]], Awaitable[None]],
     ) -> None:
         self.record = record
         self.chat_id = record.id
@@ -92,16 +92,25 @@ class Session:
         self.send = send
         self.github_token = github_token
         self.store = store
-        self.turn_lock = turn_lock
         self.notify_chats = notify_chats
         # Reads the workspace's enabled MCP servers ({name: sdk_config}) at adapter-start time.
         self.mcp_for_sdk = mcp_for_sdk
+        # Mirror this chat's changed files into the workspace if it's the "live" one (for hot reload).
+        self.live_mirror = live_mirror
 
-        self.git = GitService(workspace)
+        # repo_git points at the real repo; the agent works in this chat's private worktree (self.git,
+        # set once the worktree is created) so chats never collide and can run in parallel.
+        self.repo_git = GitService(workspace)
+        self.git = self.repo_git
+        self.worktree_path: Path | None = None
+        self._worktree_ready = False
+        if record.base_branch is None:
+            record.base_branch = self.repo_git.current_branch()
+
         self.adapter = None
         self._adapter_lock = asyncio.Lock()  # guards lazy adapter creation (warmup vs. first turn)
-        if record.base_branch is None:
-            record.base_branch = self.git.current_branch()
+        self._wt_lock = asyncio.Lock()       # serializes worktree creation (go-live vs. first turn)
+        self._turn_lock = asyncio.Lock()     # serializes turns *within this chat* (chats run in parallel)
         self._turn_active = False
         self._turn_text: list[str] = []  # accumulates stdout for the current turn
 
@@ -138,14 +147,67 @@ class Session:
         except Exception:  # noqa: BLE001
             pass
 
+    def _chat_branch(self) -> str:
+        """A stable, readable branch name for this chat's worktree."""
+        title = (self.record.title or "").strip()
+        slug = self.repo_git.sanitize_branch_name(title) if title else ""
+        slug = slug.replace("agentbridge/", "").strip("-/") or "chat"
+        return f"agentbridge/{slug}-{self.chat_id[:6]}"
+
+    async def _ensure_worktree_async(self) -> None:
+        """Create this chat's worktree off the event loop, serialized so concurrent callers
+        (auto-go-live + the first turn) never run ``git worktree add`` for the same branch at once."""
+        if self._worktree_ready:
+            return
+        async with self._wt_lock:
+            if self._worktree_ready:
+                return
+            await asyncio.to_thread(self._ensure_worktree)
+
+    def _ensure_worktree(self) -> None:
+        """Create (or reuse) this chat's private worktree and point ``self.git`` at it. Blocking
+        git work — call via :meth:`_ensure_worktree_async`. Idempotent."""
+        if self._worktree_ready:
+            return
+        branch = self.record.worktree_branch or self._chat_branch()
+        path = self.repo_git.ensure_worktree(branch, base=self.record.base_branch)
+        self.worktree_path = path
+        self.git = GitService(path)
+        self.record.worktree_branch = branch
+        if not self.record.target_branch:
+            self.record.target_branch = branch
+        self._worktree_ready = True
+        self.store.save(self.record)
+
+    def cleanup_worktree(self) -> None:
+        """Remove this chat's worktree and branch (on delete). Blocking; via asyncio.to_thread."""
+        if self.worktree_path is not None:
+            self.repo_git.discard_worktree(self.worktree_path, self.record.worktree_branch)
+
+    def changed_paths(self) -> list[str]:
+        """Every file this chat changed vs its base — committed (branch vs base) plus uncommitted —
+        so the live overlay reflects the chat's full contribution even after a commit/PR."""
+        if not self._worktree_ready:
+            return []
+        paths: set[str] = set()
+        try:
+            paths.update(c.path for c in self.git.status())
+            base = self.record.base_branch or "HEAD"
+            out = self.git.repo.git.diff("--name-only", f"{base}...HEAD")
+            paths.update(line.strip() for line in out.splitlines() if line.strip())
+        except Exception:  # noqa: BLE001
+            pass
+        return sorted(paths)
+
     async def _ensure_adapter(self) -> None:
         if self.adapter is not None:
             return
         async with self._adapter_lock:
             if self.adapter is not None:  # another caller (e.g. warmup) won the race
                 return
+            await self._ensure_worktree_async()  # agent runs in the chat's worktree
             try:
-                adapter = create_adapter(self.record.agent, self.workspace)
+                adapter = create_adapter(self.record.agent, self.worktree_path)
             except KeyError as exc:
                 raise RuntimeError(str(exc)) from exc
             if not adapter.is_available():
@@ -164,7 +226,7 @@ class Session:
                     await adapter.stop()
                 except Exception:  # noqa: BLE001
                     pass
-                adapter = create_adapter(self.record.agent, self.workspace)
+                adapter = create_adapter(self.record.agent, self.worktree_path)
                 await adapter.start(
                     SessionContext(
                         session_id=self.chat_id, title=self.record.title, resume=None,
@@ -236,10 +298,10 @@ class Session:
 
         # Mark active only once we're committed to running the turn, and always clear it in the
         # finally — otherwise an exception before/around the loop would wedge the chat as
-        # perpetually "working" and block Stop. Serialize across chats: only one agent turn
-        # touches the workspace at a time.
+        # perpetually "working" and block Stop. The lock serializes turns *within this chat*;
+        # different chats run in parallel (each in its own worktree).
         self._turn_active = True
-        async with self.turn_lock:
+        async with self._turn_lock:
             try:
                 async for event in self.adapter.send(text):  # type: ignore[union-attr]
                     await self._emit(event)
@@ -251,6 +313,10 @@ class Session:
         for path in self._dirty_paths() - before:
             if path not in self.record.touched:
                 self.record.touched.append(path)
+
+        # If this chat is the live preview, mirror its (now-updated) changes into the workspace so
+        # the dev server hot-reloads them.
+        await self.live_mirror(self.chat_id, self.changed_paths())
 
         # Persist the agent's reply, the resume handle, and the changed-file summary.
         agent_text = "".join(self._turn_text).strip()
@@ -278,6 +344,7 @@ class Session:
         async def fail(reason: str) -> None:
             await self.send(P.FileUploaded(chat_id=self.chat_id, upload_id=msg.upload_id, ok=False, error=reason))
 
+        await self._ensure_worktree_async()  # uploads go into the chat's worktree
         try:
             raw = base64.b64decode(msg.data, validate=True)
         except (binascii.Error, ValueError):
@@ -298,20 +365,24 @@ class Session:
         ))
 
     def _write_upload(self, name: str, data: bytes) -> str:
-        """Write upload bytes into .agentbridge/uploads/<chat>/, de-duplicating the filename.
-        Returns the workspace-relative path. Blocking; call via asyncio.to_thread."""
-        uploads = self.workspace / ".agentbridge" / "uploads" / self.chat_id
+        """Write upload bytes into the chat worktree's gitignored .agentbridge/uploads/<chat>/,
+        de-duplicating the filename. Returns the worktree-relative path the agent can read.
+        Blocking; call via asyncio.to_thread."""
+        self._ensure_worktree()  # uploads live in the worktree the agent actually runs in
+        root = self.worktree_path or self.workspace
+        uploads = root / ".agentbridge" / "uploads" / self.chat_id
         uploads.mkdir(parents=True, exist_ok=True)
-        self._ensure_agentbridge_gitignored()
+        self._ensure_agentbridge_gitignored(root)
         dest = _dedupe_path(uploads / _safe_filename(name))
         dest.write_bytes(data)
-        return dest.relative_to(self.workspace).as_posix()
+        return dest.relative_to(root).as_posix()
 
-    def _ensure_agentbridge_gitignored(self) -> None:
+    @staticmethod
+    def _ensure_agentbridge_gitignored(root: Path) -> None:
         """Make the whole .agentbridge/ directory invisible to git so uploads never show as
         changes or get swept into a PR — without touching the user's own .gitignore. A
         self-ignoring .gitignore inside the dir does exactly that."""
-        marker = self.workspace / ".agentbridge" / ".gitignore"
+        marker = root / ".agentbridge" / ".gitignore"
         if not marker.exists():
             marker.write_text("# Created by AgentBridge — keeps uploads/scratch out of git.\n*\n")
 
@@ -326,82 +397,70 @@ class Session:
             )
 
     async def _on_create_pr(self, msg: P.CreatePR) -> None:
-        """Commit ONLY the files the agent touched onto a fresh branch worktree, push, and
-        open a PR. The user's other (pre-existing) workspace changes are left alone."""
-        # Files the agent edited that are still actually changed on disk.
+        """Commit the chat's worktree changes onto its branch, push, and open a PR. The agent
+        already worked in this chat's private worktree, so there's nothing to relocate."""
+        await self._ensure_worktree_async()
+        # Files the agent edited that are still uncommitted, plus anything already committed on the
+        # branch (so a retry after a push failure — where the commit already landed — still works).
         touched = [p for p in self.record.touched if self.git.is_path_dirty(p)]
-        if not touched:
-            # Never fall back to committing *everything* — that would sweep up the user's own
-            # manual/unrelated changes. With nothing of the agent's left to commit, stop here.
-            text = (
-                "No new agent changes since the last PR."
-                if self.record.target_branch
-                else "No agent changes to commit yet."
-            )
-            await self.send(P.ErrorMessage(message=text, chat_id=self.chat_id))
+        has_committed = await asyncio.to_thread(self._has_commits_ahead)
+        already_prd = any(e.get("kind") == "pr" for e in self.record.transcript)
+        if not touched and (already_prd or not has_committed):
+            msg = "No new agent changes since the last PR." if already_prd else "No agent changes to commit yet."
+            await self.send(P.ErrorMessage(message=msg, chat_id=self.chat_id))
             return
 
+        files_for_meta = touched or self.changed_paths()
         # Have the model write the title/description (isolated one-shot), with a deterministic
         # fallback. Only when the user didn't type both fields already.
         gen_title = gen_summary = None
         if not ((msg.title or "").strip() and (msg.body or "").strip()):
-            gen_title, gen_summary = await self._model_pr(touched)
-        title, body = self._pr_meta(msg.title, msg.body, touched, gen_title=gen_title, gen_summary=gen_summary)
-        branch = self.record.target_branch or self.git.suggest_branch_name(title)
+            gen_title, gen_summary = await self._model_pr(files_for_meta)
+        title, body = self._pr_meta(msg.title, msg.body, files_for_meta, gen_title=gen_title, gen_summary=gen_summary)
+        branch = self.record.worktree_branch
         try:
-            # The whole sequence is blocking work — git subprocesses plus a synchronous GitHub
-            # HTTP call — so run it off the event loop; otherwise it would stall every other
-            # WebSocket connection (and turn) for the duration of the push/PR round-trip.
-            path, pr = await asyncio.to_thread(self._open_pr_blocking, branch, title, body, touched)
-        except Exception as exc:  # noqa: BLE001 — surface any failure, but never lose the user's work
-            # The workspace was never modified (changes are only reset after the PR is live), so the
-            # agent's edits are still safe — make that explicit and let the user just retry.
+            # Blocking git + a synchronous GitHub call — run off the event loop.
+            pr = await asyncio.to_thread(self._commit_pr_blocking, branch, title, body)
+        except Exception as exc:  # noqa: BLE001 — surface any failure, but never lose the agent's work
             reason = str(exc) or exc.__class__.__name__
             await self.send(P.ErrorMessage(
                 message=(f"Couldn't create the PR: {reason}\n"
-                         "Your changes are safe in the workspace — fix the issue and click Create PR again."),
+                         "Your changes are safe in this chat — fix the issue and click Create PR again."),
                 chat_id=self.chat_id,
             ))
             return
 
         self.record.touched = []  # committed — start fresh for any further edits in this chat
         self.record.target_branch = branch
-        self.record.transcript.append({"kind": "branch", "branch": branch, "worktree_path": str(path)})
+        self.record.transcript.append({"kind": "branch", "branch": branch, "worktree_path": str(self.worktree_path)})
         self.record.transcript.append({"kind": "pr", "url": pr.url, "number": pr.number})
         await self._refresh_files()
         self.store.save(self.record)
         await self.notify_chats()
-        await self.send(P.BranchCreated(chat_id=self.chat_id, branch=branch, worktree_path=str(path)))
+        await self.send(P.BranchCreated(chat_id=self.chat_id, branch=branch, worktree_path=str(self.worktree_path)))
         await self.send(P.PRCreated(chat_id=self.chat_id, url=pr.url, number=pr.number))
         await self._send_file_changes()
 
-    def _open_pr_blocking(
-        self, branch: str, title: str, body: str, touched: list[str]
-    ) -> tuple[Path, PullRequest]:
-        """Create the PR transactionally so a failure never loses the user's work.
-
-        The agent's files are *copied* onto the branch worktree (the workspace is left untouched),
-        then committed, pushed, and turned into a PR. Only once the PR is live do we reset those
-        files in the workspace. If anything fails, the half-built worktree/branch is torn down and
-        the workspace still has every change — the user can simply retry. Pure blocking work, so it
-        runs in a worker thread via ``asyncio.to_thread``.
-        """
-        path = self.git.ensure_worktree(branch)
+    def _has_commits_ahead(self) -> bool:
+        """Whether the chat's branch has commits beyond its base (e.g. a prior PR attempt committed
+        but failed to push). Blocking; call via asyncio.to_thread."""
+        if not self._worktree_ready:
+            return False
+        base = self.record.base_branch or "HEAD"
         try:
-            self.git.copy_paths_to(path, touched)
-            wt_git = GitService(path)
-            if wt_git.commit_all(title) is None:
-                raise GitError("Nothing to commit for the agent's changes.")
-            wt_git.push(branch, token=self.github_token)
-            pr = wt_git.create_pull_request(title=title, head=branch, body=body, token=self.github_token)
-        except Exception:
-            # Workspace was never touched; just remove the half-built branch so a retry is clean.
-            self.git.discard_worktree(path, branch)
-            raise
-        # PR is live — now (and only now) reset the workspace for those files, since they're on the
-        # branch. A failure here is harmless (the PR already exists); keep it out of the try above.
-        self.git.discard_paths(touched)
-        return path, pr
+            out = self.git.repo.git.rev_list("--count", f"{base}..HEAD").strip()
+            return out.isdigit() and int(out) > 0
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _commit_pr_blocking(self, branch: str, title: str, body: str) -> PullRequest:
+        """Commit the worktree's changes (no-op if a prior attempt already committed), push the
+        chat's branch, and open the PR. Blocking; runs via asyncio.to_thread."""
+        self.git.commit_all(title)  # commits if dirty; None if already clean/committed
+        if not self._has_commits_ahead():
+            raise GitError("Nothing to commit for the agent's changes.")
+        self.git.push(branch, token=self.github_token)
+        return self.git.create_pull_request(title=title, head=branch, body=body, token=self.github_token)
 
     # ------------------------------------------------------------------ #
     # Helpers
@@ -418,6 +477,10 @@ class Session:
             rel = self._rel_path(event.path)
             if rel and rel not in self.record.touched:
                 self.record.touched.append(rel)
+            # Live-mirror this single file as the agent writes it (if this chat is the preview),
+            # so the dev server hot-reloads mid-turn rather than only at the end.
+            if rel:
+                await self.live_mirror(self.chat_id, [rel])
         elif event.kind == "prompt" and event.request_id:
             await self.send(
                 P.AgentPrompt(
@@ -434,7 +497,8 @@ class Session:
         if not attachments:
             return ""
         prefix = ".agentbridge/uploads/"
-        valid = [p for p in attachments if p.startswith(prefix) and (self.workspace / p).is_file()]
+        root = self.worktree_path or self.workspace
+        valid = [p for p in attachments if p.startswith(prefix) and (root / p).is_file()]
         if not valid:
             return ""
         listing = "\n".join(f"- {p}" for p in valid)
@@ -458,14 +522,15 @@ class Session:
         )
 
     def _rel_path(self, path: str) -> str | None:
-        """Normalize an agent-reported path to a workspace-relative one (git pathspec)."""
+        """Normalize an agent-reported path to one relative to the chat's worktree (git pathspec)."""
         p = Path(path)
         if not p.is_absolute():
             return path
+        root = self.worktree_path or self.workspace
         try:
-            return str(p.relative_to(self.workspace))
+            return str(p.relative_to(root))
         except ValueError:
-            return None  # edited outside the workspace — not part of this repo's PR
+            return None  # edited outside the worktree — not part of this chat's PR
 
     def _dirty_paths(self) -> set[str]:
         """The set of workspace-relative paths with uncommitted changes right now."""
@@ -713,7 +778,11 @@ class Session:
 
 
 class ChatHub:
-    """Per-connection manager: owns the store, the live sessions, and the shared turn lock."""
+    """Per-connection manager: owns the store and the live per-chat sessions.
+
+    Each chat works in its own git worktree, so chats run in parallel. The workspace itself is a
+    *preview surface*: exactly one chat can be "live" at a time, and its changes are mirrored into
+    the workspace so the dev server hot-reloads them."""
 
     def __init__(self, workspace: Path, send: Send, github_token: str | None) -> None:
         self.workspace = workspace
@@ -723,7 +792,9 @@ class ChatHub:
         self.mcp = McpStore(workspace)
         self.git = GitService(workspace)  # validates the workspace is a git repo
         self.sessions: dict[str, Session] = {}
-        self.turn_lock = asyncio.Lock()
+        self.live_chat_id: str | None = None      # the chat currently previewed in the workspace
+        self.live_paths: set[str] = set()          # files overlaid into the workspace (to revert)
+        self._live_lock = asyncio.Lock()           # serializes workspace overlay mutations
 
     async def handle(self, msg: P.ClientMessage) -> None:
         if msg.type == "list_agents":
@@ -746,6 +817,8 @@ class ChatHub:
             await self._delete_mcp(msg)
         elif msg.type == "toggle_mcp":
             await self._toggle_mcp(msg)
+        elif msg.type == "go_live":
+            await self._go_live(msg.chat_id)
         else:
             chat_id = getattr(msg, "chat_id", None)
             session = await self._get_session(chat_id) if chat_id else None
@@ -768,9 +841,9 @@ class ChatHub:
             send=self.send,
             github_token=self.github_token,
             store=self.store,
-            turn_lock=self.turn_lock,
             notify_chats=self._send_chats,
             mcp_for_sdk=self.mcp.to_sdk,
+            live_mirror=self.live_mirror,
         )
 
     async def _get_session(self, chat_id: str | None) -> Session | None:
@@ -804,6 +877,12 @@ class ChatHub:
             P.SessionStarted(chat_id=record.id, agent=record.agent, title=record.title, branch=record.base_branch)
         )
         await self._send_chats()
+        if self.live_chat_id is None:
+            # A brand-new chat has nothing to overlay yet, so mark it live *eagerly* (don't await
+            # worktree creation) — otherwise a fast first turn could finish before go-live set the
+            # flag and its edits wouldn't mirror to the workspace.
+            self.live_chat_id = record.id
+            await self._send_live()
         asyncio.create_task(session.warmup())  # pre-start the agent so the first turn is snappy
 
     async def _open(self, msg: P.OpenChat) -> None:
@@ -829,15 +908,62 @@ class ChatHub:
                 target_branch=rec.target_branch,
             )
         )
+        await self._send_live()  # tell the client which chat (if any) is currently previewed
+        if self.live_chat_id is None:   # nothing previewed yet -> preview this one
+            await self._go_live(rec.id)
         asyncio.create_task(session.warmup())  # warm the (possibly resumed) agent in the background
 
     async def _delete(self, msg: P.DeleteChat) -> None:
         session = self.sessions.pop(msg.chat_id, None)
+        if msg.chat_id == self.live_chat_id:
+            await self._go_live(None)  # revert the overlay and clear the live preview
         if session is not None:
             await session.close()
+            await asyncio.to_thread(session.cleanup_worktree)
         self.store.delete(msg.chat_id)
         await self.send(P.ChatDeleted(chat_id=msg.chat_id))
         await self._send_chats()
+
+    # ------------------------------------------------------------------ #
+    # Live preview (which chat the dev server mirrors)
+    # ------------------------------------------------------------------ #
+
+    async def _go_live(self, chat_id: str | None) -> None:
+        """Make ``chat_id`` the live preview: revert the previous chat's overlay from the workspace,
+        then overlay this chat's worktree changes so the dev server hot-reloads them."""
+        async with self._live_lock:
+            if self.live_paths:
+                await asyncio.to_thread(self.git.discard_paths, sorted(self.live_paths))
+                self.live_paths.clear()
+            self.live_chat_id = None
+            if chat_id:
+                session = await self._get_session(chat_id)
+                if session is None:
+                    await self.send(P.ErrorMessage(message="That chat no longer exists.", chat_id=chat_id))
+                else:
+                    await session._ensure_worktree_async()
+                    paths = await asyncio.to_thread(session.changed_paths)
+                    if paths:
+                        await asyncio.to_thread(session.git.copy_paths_to, self.workspace, paths)
+                        self.live_paths = set(paths)
+                    self.live_chat_id = chat_id
+        await self._send_live()
+
+    async def live_mirror(self, chat_id: str, paths: list[str]) -> None:
+        """Mirror a chat's just-changed files into the workspace — but only if it's the live one."""
+        if chat_id != self.live_chat_id or not paths:
+            return
+        session = self.sessions.get(chat_id)
+        if session is None or not session._worktree_ready:
+            return
+        async with self._live_lock:
+            if chat_id != self.live_chat_id:   # re-check under the lock
+                return
+            await asyncio.to_thread(session.git.copy_paths_to, self.workspace, paths)
+            self.live_paths.update(paths)
+
+    async def _send_live(self) -> None:
+        await self.send(P.LiveChat(chat_id=self.live_chat_id))
 
     async def _end(self, msg: P.EndSession) -> None:
         if msg.chat_id:

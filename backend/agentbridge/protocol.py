@@ -173,6 +173,14 @@ class EndSession(BaseModel):
     chat_id: str | None = None
 
 
+class GoLive(BaseModel):
+    """Make this chat the one the dev server previews: its worktree changes are overlaid onto the
+    workspace (where the dev server watches) so it hot-reloads. chat_id=None clears the preview."""
+
+    type: Literal["go_live"]
+    chat_id: str | None = None
+
+
 class ListMcp(BaseModel):
     type: Literal["list_mcp"]
 
@@ -208,6 +216,7 @@ ClientMessage = Annotated[
         StopAgent,
         CreatePR,
         EndSession,
+        GoLive,
         ListMcp,
         SaveMcp,
         DeleteMcp,
@@ -248,6 +257,14 @@ class McpServers(ServerMessage):
 
     type: Literal["mcp_servers"] = "mcp_servers"
     servers: list[McpServerSpec]
+
+
+class LiveChat(ServerMessage):
+    """Which chat the dev server is currently previewing (its changes are overlaid on the
+    workspace), or None if none. Broadcast so every connection can show the ● Live badge."""
+
+    type: Literal["live_chat"] = "live_chat"
+    chat_id: str | None = None
 
 
 class SessionStarted(ServerMessage):

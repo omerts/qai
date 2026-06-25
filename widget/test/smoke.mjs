@@ -303,6 +303,27 @@ async function main() {
   assert.ok(mans && mans.answer === "Dark mode, Export", "multi-select answer not joined: " + (mans && mans.answer));
   widget.activeChatId = null;
 
+  // --- Multiple chats: list shows running dots + a Go-live toggle per chat ---
+  sent.length = 0;
+  widget._toggleDrawer(true);
+  widget._onChats([
+    { id: "a", title: "Chat A", agent: "claude-code", updated_at: "t", message_count: 1 },
+    { id: "b", title: "Chat B", agent: "claude-code", updated_at: "t", message_count: 0 },
+  ]);
+  widget._onMessage({ type: "status", chat_id: "a", state: "working" });  // A is working
+  widget._onMessage({ type: "live_chat", chat_id: "b" });                  // B is live
+  const items = widget.shadow.querySelectorAll(".ab-chat-item");
+  assert.equal(items.length, 2, "both chats listed");
+  assert.ok(widget.shadow.querySelector(".ab-chat-dot"), "a working chat shows a running dot");
+  const liveBtns = widget.shadow.querySelectorAll(".ab-chat-live");
+  assert.ok(Array.from(liveBtns).some((b) => /● Live/.test(b.textContent) && b.classList.contains("on")),
+    "the live chat shows the ● Live badge");
+  // Clicking "Go live" on the non-live chat sends go_live for it.
+  const goLiveA = Array.from(liveBtns).find((b) => b.textContent === "Go live");
+  goLiveA.click();
+  assert.ok(sent.some((m) => m.type === "go_live" && m.chat_id === "a"), "Go live should send go_live");
+  widget._toggleDrawer(false);
+
   // --- Plugins (MCP): open the panel, list servers, add via the form, toggle, delete ---
   sent.length = 0;
   widget._togglePlugins(true);
@@ -402,7 +423,7 @@ async function main() {
   assert.equal(widget.root.style.left, "auto", "left should be released for a right anchor");
   assert.equal(widget.root.style.top, "auto", "top should be released for a bottom anchor");
 
-  console.log("OK — widget mounts, streams, renders markdown, resets, attaches files, answers agent questions, selects model + effort + mode, manages plugins, drags (panel + bubble), and themes per agent.");
+  console.log("OK — widget mounts, streams, renders markdown, resets, attaches files, answers agent questions, runs multiple chats (live preview + activity), selects model + effort + mode, manages plugins, drags (panel + bubble), and themes per agent.");
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error("FAIL:", e.message); process.exit(1); });

@@ -150,28 +150,28 @@ def test_full_session_flow(client):
 
         ws.send_json({"type": "user_message", "chat_id": chat_id, "text": "add a feature"})
         _recv_until(ws, "file_changes")   # turn complete
-        # File the agent created is really on disk — it edits in place while you work.
+        # The agent worked in its own worktree; because this (first) chat is live, its change is
+        # mirrored into the workspace so the dev server hot-reloads it.
         assert (repo / "feature.txt").exists()
 
-        # A pre-existing, unrelated change the user is also working on — the agent must NOT
-        # sweep this into its PR.
+        # A pre-existing, unrelated change the user is also working on — it lives only in the
+        # workspace (not the chat's worktree), so it can never end up in the PR.
         (repo / "my_notes.txt").write_text("personal wip\n")
 
-        # Open a PR: only the agent's file is committed onto a derived branch worktree; the
-        # user's unrelated change is left in the workspace.
         ws.send_json({"type": "create_pr", "chat_id": chat_id, "title": "Add feature"})
         created = _recv_until(ws, "branch_created")
         assert created["branch"].startswith("agentbridge/")
-        assert created["worktree_path"]               # committed onto a real worktree
+        assert created["worktree_path"]               # committed in the chat's worktree
         pr = _recv_until(ws, "pr_created")
         assert pr["url"].endswith("/pull/7")
         assert pr["number"] == 7
-        assert not (repo / "feature.txt").exists()    # the agent's file moved onto the branch
-        assert (repo / "my_notes.txt").exists()       # the unrelated change stays put
-        porcelain = subprocess.run(
-            ["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True
+        assert (repo / "my_notes.txt").exists()       # the user's unrelated change stays put
+        # The PR branch committed only the agent's file — my_notes.txt was never in the worktree.
+        committed = subprocess.run(
+            ["git", "show", "--stat", "--name-only", "--format=", created["branch"]],
+            cwd=repo, capture_output=True, text=True,
         ).stdout
-        assert "my_notes.txt" in porcelain and "feature.txt" not in porcelain
+        assert "feature.txt" in committed and "my_notes.txt" not in committed
 
 
 def test_chat_file_list_shows_only_agent_changes(client):
@@ -309,11 +309,12 @@ def test_chat_persistence_and_resume(client):
 
 
 def test_upload_file_stored_and_gitignored(client):
-    """An uploaded file lands under .agentbridge/uploads/<chat>/, the agent can read it by the
-    returned path, and the whole .agentbridge dir is kept out of git."""
+    """An uploaded file lands under the chat worktree's .agentbridge/uploads/<chat>/, the agent
+    can read it by the returned path, and the whole .agentbridge dir is kept out of git."""
     import base64
 
     tc, repo, _ = client
+    wt_base = repo.parent / "agentbridge-wt"   # matches AGENTBRIDGE_WORKTREE_DIR in the fixture
     with tc.websocket_connect("/ws") as ws:
         ws.send_json({"type": "start_session", "agent": "fake", "title": "feat"})
         chat_id = _recv_until(ws, "session_started")["chat_id"]
@@ -325,12 +326,15 @@ def test_upload_file_stored_and_gitignored(client):
         assert res["ok"] is True and res["upload_id"] == "u1"
         assert res["path"].startswith(".agentbridge/uploads/") and res["path"].endswith("notes.txt")
         assert res["size"] == len(b"hello bytes")
-        assert (repo / res["path"]).read_bytes() == b"hello bytes"
 
-    assert (repo / ".agentbridge" / ".gitignore").is_file()
-    # git must not see the upload (the self-ignoring .gitignore hides the whole dir).
+    # The file is in the chat's worktree (where the agent runs), not the workspace.
+    matches = list(wt_base.rglob("notes.txt"))
+    assert matches and matches[0].read_bytes() == b"hello bytes"
+    assert not (repo / res["path"]).exists()
+    worktree_dir = matches[0].parents[3]   # <wt>/.agentbridge/uploads/<chat>/notes.txt -> <wt>
+    assert (worktree_dir / ".agentbridge" / ".gitignore").is_file()
     porcelain = subprocess.run(
-        ["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True
+        ["git", "status", "--porcelain"], cwd=worktree_dir, capture_output=True, text=True
     ).stdout
     assert ".agentbridge" not in porcelain
 
@@ -410,6 +414,27 @@ def test_mcp_servers_persist_across_connections(client):
         ws.send_json({"type": "list_mcp"})
         servers = _recv_until(ws, "mcp_servers")["servers"]
         assert [s["name"] for s in servers] == ["figma"]
+
+
+def test_go_live_overlays_and_reverts(client):
+    """The live chat's worktree changes are mirrored into the workspace (dev-server preview);
+    toggling live off reverts them, and back on re-applies — exercising the overlay."""
+    tc, repo, _ = client
+    with tc.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "start_session", "agent": "fake", "title": "A"})
+        a = _recv_until(ws, "session_started")["chat_id"]
+        assert _recv_until(ws, "live_chat")["chat_id"] == a   # first chat is auto-live
+        ws.send_json({"type": "user_message", "chat_id": a, "text": "go"})
+        _recv_until(ws, "file_changes")
+        assert (repo / "feature.txt").exists()                # live -> mirrored into the workspace
+
+        ws.send_json({"type": "go_live", "chat_id": None})    # stop previewing
+        assert _recv_until(ws, "live_chat")["chat_id"] is None
+        assert not (repo / "feature.txt").exists()            # overlay reverted
+
+        ws.send_json({"type": "go_live", "chat_id": a})       # preview again
+        assert _recv_until(ws, "live_chat")["chat_id"] == a
+        assert (repo / "feature.txt").exists()                # re-applied
 
 
 def _drain_idle(ws, chat_id, limit=30):

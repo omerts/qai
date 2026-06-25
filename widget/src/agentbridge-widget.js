@@ -101,6 +101,8 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.agents = [];
     this.chats = [];
     this.activeChatId = null;
+    this.chatRunning = {};       // chat_id -> bool: which chats are currently working (any chat)
+    this.liveChatId = null;      // chat whose changes the dev server is previewing
     this.selectedAgent = lsGet(LS_AGENT) || null;
     this.sessionAgent = null;
     this.branch = null;
@@ -644,6 +646,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     switch (msg.type) {
       case "agents": return this._onAgents(msg.agents);
       case "chats": return this._onChats(msg.chats);
+      case "live_chat": this.liveChatId = msg.chat_id; return this._renderChatList();
       case "mcp_servers": return this._onMcpServers(msg.servers);
       case "session_started": return this._onSessionStarted(msg);
       case "chat_history": return this._onChatHistory(msg);
@@ -659,7 +662,12 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       case "file_changes": return this._isActive(msg) && this._onFileChanges(msg.files);
       case "file_uploaded": return this._isActive(msg) && this._onFileUploaded(msg);
       case "pr_created": return this._isActive(msg) && this._prLink(msg.url, msg.number);
-      case "status": return this._isActive(msg) && this._onStatus(msg.state);
+      case "status":
+        // Track every chat's running state (so the chat list shows which are working), and drive
+        // the active chat's composer/stop UI as before.
+        this.chatRunning[msg.chat_id] = (msg.state === "working" || msg.state === "thinking");
+        this._renderChatList();
+        return this._isActive(msg) && this._onStatus(msg.state);
       case "error":
         if (msg.chat_id && msg.chat_id !== this.activeChatId) return;
         return this.bridge.addSystem(msg.message, "error");
@@ -707,15 +715,32 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       return;
     }
     this.chats.forEach(function (c) {
+      var running = !!self.chatRunning[c.id];
+      var live = c.id === self.liveChatId;
       var item = h("div", { class: "ab-chat-item" + (c.id === self.activeChatId ? " active" : "") });
+      var titleRow = h("div", { class: "ab-chat-title-row" }, [
+        running ? h("span", { class: "ab-chat-dot", title: "Working…" }) : null,
+        h("span", { class: "ab-chat-title", text: c.title || "New chat" }),
+      ].filter(Boolean));
       var main = h("div", { class: "ab-chat-main" }, [
-        h("div", { class: "ab-chat-title", text: c.title || "New chat" }),
+        titleRow,
         h("div", { class: "ab-chat-meta", text: c.agent + " · " + c.message_count + " msg" }),
       ]);
       main.addEventListener("click", function () { self._openChat(c.id); });
+      // Live toggle: the live chat's changes are mirrored to the workspace (dev server preview).
+      var liveBtn = h("button", {
+        class: "ab-chat-live" + (live ? " on" : ""),
+        title: live ? "Previewing in your dev server — click to stop" : "Preview this chat in your dev server",
+        text: live ? "● Live" : "Go live",
+      });
+      liveBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        self._send({ type: "go_live", chat_id: live ? null : c.id });
+      });
       var del = h("button", { class: "ab-chat-del", title: "Delete chat", text: "🗑" });
       del.addEventListener("click", function (e) { e.stopPropagation(); self._deleteChat(c.id); });
       item.appendChild(main);
+      item.appendChild(liveBtn);
       item.appendChild(del);
       self.drawerList.appendChild(item);
     });
