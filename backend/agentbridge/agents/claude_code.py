@@ -66,9 +66,13 @@ def _sandbox_enabled() -> bool:
     return os.environ.get("AGENTBRIDGE_CLAUDE_SANDBOX", "0").strip().lower() in ("1", "true", "yes", "on")
 
 # Tools that should ask the user before running. Read-only tools are auto-approved by the
-# SDK and never reach our callback; these are the ones worth a confirmation.
-_CONFIRM_TOOLS = {"edit", "write", "multiedit", "str_replace", "notebookedit", "bash"}
+# SDK and never reach our callback; these are the ones worth a confirmation. ``exitplanmode`` is
+# how the agent leaves plan mode — confirming it is the user approving the proposed plan.
+_CONFIRM_TOOLS = {"edit", "write", "multiedit", "str_replace", "notebookedit", "bash", "exitplanmode"}
 _ALLOW_ANSWERS = {"allow", "yes", "y", "approve", "ok", ""}
+
+# SDK permission modes we accept from the widget (see ClaudeAgentOptions.permission_mode).
+_VALID_MODES = {"default", "plan", "acceptEdits", "dontAsk", "bypassPermissions"}
 
 # File-mutating tools — a tool_use of one of these means a file was touched.
 _EDIT_TOOLS = {"edit", "write", "create", "multiedit", "str_replace", "notebookedit"}
@@ -193,13 +197,15 @@ class ClaudeCodeAdapter(AgentAdapter):
         self._auto_approve: bool = False   # when True, skip prompts for routine edits/commands
         self._interrupted: bool = False    # set while a user-requested stop is in flight
         self._mcp_servers: dict = {}       # user-registered MCP servers (plugins), {name: config}
+        self._mode: str = "default"        # SDK permission_mode for the next turn ("plan" etc.)
+        self._applied_mode: str | None = None  # last mode pushed to the live client
 
     @classmethod
     def is_available(cls) -> bool:
         return cls.client_factory is not None or _sdk_installed()
 
     def capabilities(self) -> Capabilities:
-        return Capabilities(streaming=True, interactive=True, edits_files=True)
+        return Capabilities(streaming=True, interactive=True, edits_files=True, plan_mode=True)
 
     async def start(self, ctx: SessionContext) -> None:
         self._resume = ctx.resume
@@ -250,6 +256,31 @@ class ClaudeCodeAdapter(AgentAdapter):
 
     def set_auto_approve(self, enabled: bool) -> None:
         self._auto_approve = bool(enabled)
+
+    def set_mode(self, mode: str | None) -> None:
+        m = (mode or "default").strip()
+        if m in ("", "code"):
+            m = "default"
+        self._mode = m if m in _VALID_MODES else "default"
+
+    async def _apply_mode(self) -> None:
+        """Push the selected permission mode to the live client before a turn. The SDK applies it
+        immediately for subsequent tool requests; we only call on change."""
+        if self._client is None or self._mode == self._applied_mode:
+            return
+        setter = getattr(self._client, "set_permission_mode", None)
+        if setter is None:
+            if self._mode != "default":
+                _log.warning(
+                    "Installed claude-agent-sdk has no set_permission_mode; '%s' mode ignored.",
+                    self._mode,
+                )
+            return
+        try:
+            await setter(self._mode)
+            self._applied_mode = self._mode
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("Failed to set permission mode '%s': %s", self._mode, exc)
 
     async def interrupt(self) -> bool:
         """Stop the in-flight turn. The current receive loop then ends and the turn finishes."""
@@ -319,6 +350,10 @@ class ClaudeCodeAdapter(AgentAdapter):
 
     @staticmethod
     def _describe_tool(tool_name: str, tool_input: dict) -> str:
+        if tool_name.lower() == "exitplanmode":
+            plan = (tool_input or {}).get("plan") or ""
+            header = "Claude finished planning. Approve to let it proceed with changes?"
+            return f"{header}\n\n{plan}".strip()
         target = tool_input.get("file_path") or tool_input.get("path") or tool_input.get("command")
         if target:
             return f"Claude wants to run {tool_name} on: {target}"
@@ -332,6 +367,8 @@ class ClaudeCodeAdapter(AgentAdapter):
         if self._client is None:
             yield AgentEvent.error("Claude Code session is not started.")
             return
+
+        await self._apply_mode()  # honor the selected mode (e.g. plan) for this turn
 
         queue: asyncio.Queue[AgentEvent] = asyncio.Queue()
         self._queue = queue

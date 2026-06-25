@@ -45,6 +45,20 @@ def test_mcp_status_events_ignores_non_init_and_healthy(tmp_path: Path):
     assert adapter._mcp_status_events(healthy) == []
 
 
+def test_set_mode_normalizes(tmp_path: Path):
+    a = ClaudeCodeAdapter(tmp_path)
+    assert a._mode == "default"
+    a.set_mode("plan"); assert a._mode == "plan"
+    a.set_mode("code"); assert a._mode == "default"      # widget alias for normal operation
+    a.set_mode(None); assert a._mode == "default"
+    a.set_mode("bogus"); assert a._mode == "default"     # unknown -> safe default
+    a.set_mode("acceptEdits"); assert a._mode == "acceptEdits"
+
+
+def test_claude_advertises_plan_mode(tmp_path: Path):
+    assert ClaudeCodeAdapter(tmp_path).capabilities().plan_mode is True
+
+
 def _make_session(tmp_path: Path, send, agent: str = "fake") -> Session:
     store = ChatStore(tmp_path)
     record = store.create(agent=agent, title="t")

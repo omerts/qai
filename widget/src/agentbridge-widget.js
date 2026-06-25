@@ -57,6 +57,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   var LS_AGENT = "agentbridge:agent";
   var LS_CHAT = "agentbridge:activeChat";
   var LS_AUTO = "agentbridge:autoApprove";
+  var LS_MODE = "agentbridge:mode";   // working mode: "default" | "plan"
   var LS_POS = "agentbridge:pos";   // dragged {left, top} of the widget
 
   function lsGet(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } }
@@ -115,6 +116,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.queue = [];             // follow-ups typed while busy: {text, element, attachments}
     this._inspecting = false;
     this.autoApprove = lsGet(LS_AUTO) !== "0";  // default ON; "0" = user turned it off
+    this.mode = lsGet(LS_MODE) || "default";    // "default" (code) | "plan"
     this._autoOpened = false;
     this._init();
   }
@@ -186,6 +188,12 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     // Controls: agent picker + PR + inspect
     this.agentSelect = h("select", { class: "ab-select", title: "Default agent for new chats" });
     this.agentSelect.addEventListener("change", function () { self._selectAgent(); });
+    // Working mode (shown only for agents that support it, e.g. Claude's plan mode).
+    this.modeSelect = h("select", { class: "ab-select ab-mode", title: "Working mode" });
+    this.modeSelect.appendChild(h("option", { value: "default", text: "Code" }));
+    this.modeSelect.appendChild(h("option", { value: "plan", text: "Plan" }));
+    this.modeSelect.value = this.mode;
+    this.modeSelect.addEventListener("change", function () { self._selectMode(); });
     this.prBtn = h("button", { class: "ab-btn", text: "Create PR", title: "Commit only the agent's edits to a new branch and open a pull request (your other changes stay put). Type a title first to name it, or leave blank to auto-name from the agent's summary." });
     this.prBtn.addEventListener("click", function () { self._createPR(); });
     this.inspectBtn = h("button", { class: "ab-iconbtn ab-inspect ab-tip" });
@@ -203,7 +211,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.pluginsBtn.addEventListener("click", function () { self._togglePlugins(); });
     this.branchLabel = h("span", { class: "ab-branch-label" });
     var controls = h("div", { class: "ab-controls" }, [
-      this.agentSelect, this.prBtn, this.inspectBtn, this.autoBtn, this.pluginsBtn, this.branchLabel,
+      this.agentSelect, this.modeSelect, this.prBtn, this.inspectBtn, this.autoBtn, this.pluginsBtn, this.branchLabel,
     ]);
     this._refreshAutoApproveBtn();
 
@@ -831,6 +839,10 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       type: "user_message", chat_id: this.activeChatId, text: text,
       context: context, auto_approve: this.autoApprove,
     };
+    // Only send a non-default mode, and only when the active agent supports modes.
+    if (this.mode && this.mode !== "default" && this._activeAgentCaps().plan_mode) {
+      payload.mode = this.mode;
+    }
     if (attachments && attachments.length) payload.attachments = attachments;
     this._send(payload);
   };
@@ -1419,6 +1431,30 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       if (theme && theme[key]) this.root.style.setProperty(vars[key], theme[key]);
       else this.root.style.removeProperty(vars[key]);
     }
+    this._updateModeVisibility();
+  };
+
+  // Capabilities of the agent currently in effect, or {} if unknown.
+  AgentBridgeWidget.prototype._activeAgentCaps = function () {
+    var name = this._activeAgentName();
+    for (var i = 0; i < this.agents.length; i++) {
+      if (this.agents[i].name === name) return this.agents[i].capabilities || {};
+    }
+    return {};
+  };
+
+  // Only show the mode picker for agents that support modes (e.g. Claude's plan mode).
+  AgentBridgeWidget.prototype._updateModeVisibility = function () {
+    if (!this.modeSelect) return;
+    this.modeSelect.hidden = !this._activeAgentCaps().plan_mode;
+  };
+
+  AgentBridgeWidget.prototype._selectMode = function () {
+    this.mode = this.modeSelect.value || "default";
+    lsSet(LS_MODE, this.mode);
+    this._system(this.mode === "plan"
+      ? "Plan mode — the agent will analyze and propose a plan without making changes. Approve the plan to let it proceed."
+      : "Code mode — the agent makes changes directly.");
   };
 
   AgentBridgeWidget.prototype._updateBranchLabel = function () {

@@ -123,6 +123,13 @@ Each agent implements the `AgentAdapter` contract in [`backend/agentbridge/agent
 - **Auto-approve (default on).** A shield toggle lets routine actions run without prompting — but commands that look destructive (`rm -rf`, `sudo`, `git push --force`, `git reset --hard`, `curl … | sh`, recursive `chmod`/`chown`, disk writes, `shutdown`, …) still surface an Allow / Deny card. The preference is per-browser and only affects Claude Code (Cursor runs headless).
 - **Stop & queue.** Stop a running turn at any time, and queue follow-up messages while the agent is busy.
 
+### Modes (Plan mode)
+
+For agents that support it (Claude Code), a **mode picker** in the controls row switches between:
+
+- **Code** — normal operation; the agent makes changes directly (subject to approvals above).
+- **Plan** — the agent analyzes and proposes a plan **without making changes**. When it's done it surfaces the plan as an Allow / Deny card; approve to let it proceed (or switch back to **Code** and continue). The mode is sent per message and applied with the SDK's `permission_mode`, so you can switch freely between turns. The picker is hidden for agents that don't support modes (e.g. Cursor).
+
 ### Workspace settings
 
 Agents run _in your workspace_ and honor its own configuration:

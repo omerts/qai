@@ -233,6 +233,30 @@ async function main() {
 
   widget.queue = []; widget._renderQueue(); widget.activeChatId = null;
 
+  // --- Modes: the picker shows only for agents that support it, and rides on the message ---
+  widget._onAgents([
+    { name: "claude-code", label: "Claude Code", available: true, capabilities: { plan_mode: true } },
+    { name: "cursor", label: "Cursor", available: true, capabilities: {} },
+  ]);
+  const modeSel = widget.shadow.querySelector(".ab-mode");
+  assert.ok(modeSel, "mode select missing");
+  widget.sessionAgent = "claude-code"; widget.selectedAgent = "claude-code"; widget._applyTheme();
+  assert.ok(!modeSel.hidden, "mode picker should show for a plan-capable agent");
+  widget.sessionAgent = "cursor"; widget.selectedAgent = "cursor"; widget._applyTheme();
+  assert.ok(modeSel.hidden, "mode picker should hide for an agent without plan mode");
+  // Plan mode rides along on the message for a capable agent; default mode is omitted.
+  widget.sessionAgent = "claude-code"; widget.selectedAgent = "claude-code"; widget._applyTheme();
+  sent.length = 0; widget.activeChatId = "c1"; widget.running = false;
+  widget.mode = "plan"; widget.modeSelect.value = "plan";
+  widget.input.value = "plan the thing"; widget._sendMessage();
+  let pmsg = sent.find((m) => m.type === "user_message");
+  assert.equal(pmsg && pmsg.mode, "plan", "plan mode should be sent with the message");
+  sent.length = 0; widget.mode = "default"; widget.modeSelect.value = "default";
+  widget.input.value = "code the thing"; widget._sendMessage();
+  pmsg = sent.find((m) => m.type === "user_message");
+  assert.ok(pmsg && pmsg.mode === undefined, "default mode should not be sent");
+  widget.activeChatId = null; widget.sessionAgent = null; widget.selectedAgent = null;
+
   // --- Plugins (MCP): open the panel, list servers, add via the form, toggle, delete ---
   sent.length = 0;
   widget._togglePlugins(true);
@@ -332,7 +356,7 @@ async function main() {
   assert.equal(widget.root.style.left, "auto", "left should be released for a right anchor");
   assert.equal(widget.root.style.top, "auto", "top should be released for a bottom anchor");
 
-  console.log("OK — widget mounts, streams, renders markdown, resets, attaches files, manages plugins, drags (panel + bubble), and themes per agent.");
+  console.log("OK — widget mounts, streams, renders markdown, resets, attaches files, selects modes, manages plugins, drags (panel + bubble), and themes per agent.");
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error("FAIL:", e.message); process.exit(1); });

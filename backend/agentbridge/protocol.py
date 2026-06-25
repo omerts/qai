@@ -105,6 +105,9 @@ class UserMessage(BaseModel):
     # When True, the agent auto-approves routine file edits and shell commands for this turn
     # (risky shell commands still prompt). Reflects the widget's auto-approve toggle.
     auto_approve: bool = False
+    # Working mode for this turn: "plan" (analyze + propose a plan, no changes) or "default"/None
+    # for normal operation. Only honored by agents that advertise the plan_mode capability.
+    mode: str | None = None
     # Workspace-relative paths of files the user attached to this turn (previously uploaded via
     # ``upload_file``). The server points the agent at them in the preamble.
     attachments: list[str] = Field(default_factory=list)

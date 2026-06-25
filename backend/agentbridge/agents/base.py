@@ -21,9 +21,15 @@ class Capabilities:
     streaming: bool = True       # emits incremental output chunks
     interactive: bool = False    # can ask the user mid-run (AgentEvent.prompt)
     edits_files: bool = True     # makes changes to the workspace
+    plan_mode: bool = False      # supports a no-execution "plan" mode (see AgentAdapter.set_mode)
 
     def as_dict(self) -> dict[str, bool]:
-        return {"streaming": self.streaming, "interactive": self.interactive, "edits_files": self.edits_files}
+        return {
+            "streaming": self.streaming,
+            "interactive": self.interactive,
+            "edits_files": self.edits_files,
+            "plan_mode": self.plan_mode,
+        }
 
 
 @dataclass
@@ -143,6 +149,14 @@ class AgentAdapter(ABC):
         """Toggle auto-approval of tool actions (file edits / shell commands) for upcoming
         turns. When enabled, an interactive adapter should skip the Allow/Deny prompt for
         routine actions. Default is a no-op — headless adapters (e.g. Cursor) never prompt.
+        """
+        return None
+
+    def set_mode(self, mode: str | None) -> None:
+        """Set the working mode for upcoming turns. The only non-default mode in v1 is ``plan``
+        (analyze and propose a plan without making changes); ``None``/``default`` is normal
+        operation. Only meaningful for adapters whose ``capabilities().plan_mode`` is True;
+        the default is a no-op.
         """
         return None
 
