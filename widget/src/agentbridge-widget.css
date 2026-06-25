@@ -403,6 +403,14 @@
 .ab-file .code { color: var(--ab-accent); width: 18px; flex: none; }
 .ab-file-path { flex: 1; min-width: 0; overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
 
+/* Slash (/) skill menu — sits just above the composer */
+.ab-slash { display: none; max-height: 200px; overflow-y: auto; border-top: 1px solid var(--ab-border); }
+.ab-slash.show { display: block; }
+.ab-slash-item { display: flex; flex-direction: column; gap: 1px; padding: 6px 12px; cursor: pointer; }
+.ab-slash-item.sel, .ab-slash-item:hover { background: var(--ab-surface); }
+.ab-slash-name { font-family: var(--ab-mono); font-size: 12px; color: var(--ab-fg); }
+.ab-slash-desc { font-size: 11px; color: var(--ab-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* Composer */
 .ab-composer { display: flex; align-items: stretch; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--ab-border); }
 .ab-input {

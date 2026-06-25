@@ -852,6 +852,8 @@ class ChatHub:
             await self._toggle_mcp(msg)
         elif msg.type == "go_live":
             await self._go_live(msg.chat_id)
+        elif msg.type == "list_skills":
+            await self._send_skills()
         else:
             chat_id = getattr(msg, "chat_id", None)
             session = await self._get_session(chat_id) if chat_id else None
@@ -1006,6 +1008,11 @@ class ChatHub:
 
     async def _send_chats(self) -> None:
         await self.send(P.Chats(chats=[P.ChatMeta(**m) for m in self.store.list_meta()]))
+
+    async def _send_skills(self) -> None:
+        from .skills import list_skills
+        items = await asyncio.to_thread(list_skills, self.workspace)
+        await self.send(P.Skills(skills=[P.SkillInfo(**s) for s in items]))
 
     # ------------------------------------------------------------------ #
     # MCP servers (plugins)

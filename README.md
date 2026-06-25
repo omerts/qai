@@ -142,7 +142,7 @@ An **effort picker** sits beside it for **reasoning effort** — **Default / Low
 Agents run _in your workspace_ and honor its own configuration:
 
 - **Claude Code** loads the workspace's `.claude/settings.json`, `.mcp.json`, hooks, custom agents, and `CLAUDE.md`, plus your user settings (`~/.claude`; in Docker, the `agentbridge-claude-home` volume at `/home/app/.claude`). It deliberately omits the `local` source (`.claude/settings.local.json`) so AgentBridge never reads or **creates a `.claude` file in your workspace** — approvals flow through the Allow/Deny card instead. Tune with `AGENTBRIDGE_CLAUDE_SETTING_SOURCES`.
-  - **Agent Skills.** The agent picks up your workspace's [Agent Skills](https://code.claude.com/docs/en/skills) (`.claude/skills/*/SKILL.md`) and invokes them when relevant. Because each chat runs in its own worktree (a checkout), AgentBridge copies your workspace's `.claude/skills/` into the worktree so **even uncommitted skills** are available — and keeps that copy out of the live preview and out of PRs.
+  - **Agent Skills.** The agent picks up your workspace's [Agent Skills](https://code.claude.com/docs/en/skills) (`.claude/skills/*/SKILL.md`) and invokes them when relevant. Because each chat runs in its own worktree (a checkout), AgentBridge copies your workspace's `.claude/skills/` into the worktree so **even uncommitted skills** are available — and keeps that copy out of the live preview and out of PRs. Type **`/`** in the composer to browse/filter your skills (↑/↓ + Enter to pick), then add details and send.
 - **Cursor** picks up `.cursor/rules`, `.cursorrules`, and `AGENTS.md` automatically.
 
 ---

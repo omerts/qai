@@ -437,6 +437,19 @@ def test_go_live_overlays_and_reverts(client):
         assert (repo / "feature.txt").exists()                # re-applied
 
 
+def test_list_skills(client, monkeypatch):
+    """The workspace's Agent Skills are enumerated for the widget's '/' menu."""
+    tc, repo, _ = client
+    monkeypatch.setenv("HOME", str(repo.parent / "home"))   # don't scan the real ~/.claude
+    skill = repo / ".claude" / "skills" / "pdf"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: pdf\ndescription: Work with PDF files\n---\nSteps.\n")
+    with tc.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "list_skills"})
+        skills = _recv_until(ws, "skills")["skills"]
+    assert any(s["name"] == "pdf" and "PDF" in s["description"] for s in skills)
+
+
 def _drain_idle(ws, chat_id, limit=30):
     for _ in range(limit):
         msg = ws.receive_json()

@@ -233,6 +233,23 @@ async function main() {
 
   widget.queue = []; widget._renderQueue(); widget.activeChatId = null;
 
+  // --- Slash skill menu: typing "/" lists skills; picking one fills the composer ---
+  widget._onMessage({ type: "skills", skills: [
+    { name: "pdf", description: "Work with PDFs" },
+    { name: "docx", description: "Work with Word docs" },
+  ] });
+  const slash = widget.shadow.querySelector(".ab-slash");
+  widget.input.value = "/"; widget._onComposerInput();
+  assert.ok(slash.classList.contains("show"), "slash menu should open on '/'");
+  assert.equal(widget.shadow.querySelectorAll(".ab-slash-item").length, 2, "both skills listed");
+  widget.input.value = "/do"; widget._onComposerInput();
+  assert.equal(widget._slashItems.length, 1, "menu filters by typed text");
+  assert.equal(widget._slashItems[0].name, "docx", "filter matched the right skill");
+  widget._acceptSlash(0);
+  assert.equal(widget.input.value, "/docx ", "accepting a skill fills the composer");
+  assert.ok(!slash.classList.contains("show"), "menu closes after accept");
+  widget.input.value = ""; widget._hideSlash();
+
   // --- Modes: the picker shows only for agents that support it, and rides on the message ---
   widget._onAgents([
     { name: "claude-code", label: "Claude Code", available: true, capabilities: { plan_mode: true },
@@ -435,7 +452,7 @@ async function main() {
   assert.equal(widget.root.style.left, "auto", "left should be released for a right anchor");
   assert.equal(widget.root.style.top, "auto", "top should be released for a bottom anchor");
 
-  console.log("OK — widget mounts, streams, renders markdown, resets, attaches files, answers agent questions, runs multiple chats (live preview + activity), selects model + effort + mode, manages plugins, drags (panel + bubble), and themes per agent.");
+  console.log("OK — widget mounts, streams, renders markdown, resets, attaches files, answers agent questions, runs multiple chats (live preview + activity), '/' skill menu, selects model + effort + mode, manages plugins, drags (panel + bubble), and themes per agent.");
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error("FAIL:", e.message); process.exit(1); });

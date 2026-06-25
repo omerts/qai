@@ -184,6 +184,10 @@ class GoLive(BaseModel):
     chat_id: str | None = None
 
 
+class ListSkills(BaseModel):
+    type: Literal["list_skills"]
+
+
 class ListMcp(BaseModel):
     type: Literal["list_mcp"]
 
@@ -220,6 +224,7 @@ ClientMessage = Annotated[
         CreatePR,
         EndSession,
         GoLive,
+        ListSkills,
         ListMcp,
         SaveMcp,
         DeleteMcp,
@@ -260,6 +265,18 @@ class McpServers(ServerMessage):
 
     type: Literal["mcp_servers"] = "mcp_servers"
     servers: list[McpServerSpec]
+
+
+class SkillInfo(BaseModel):
+    name: str
+    description: str = ""
+
+
+class Skills(ServerMessage):
+    """Agent Skills available in the workspace, for the widget's "/" command menu."""
+
+    type: Literal["skills"] = "skills"
+    skills: list[SkillInfo]
 
 
 class LiveChat(ServerMessage):

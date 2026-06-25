@@ -117,6 +117,10 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.attachments = [];       // uploaded files for the next msg: {id, name, size, status, path}
     this._uploadSeq = 0;         // monotonic id source for correlating upload results
     this.mcpServers = [];        // registered MCP plugins (from the server)
+    this.skills = [];            // available Agent Skills (for the "/" menu)
+    this._slashOpen = false;     // is the "/" skill menu showing
+    this._slashItems = [];       // currently-filtered skills
+    this._slashIdx = 0;          // highlighted item in the "/" menu
     this.running = false;        // true while the active chat's agent is working
     this.queue = [];             // follow-ups typed while busy: {text, element, attachments}
     this._inspecting = false;
@@ -260,9 +264,15 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     // Queued follow-ups (typed while the agent is busy), shown above the composer.
     this.queueBar = h("div", { class: "ab-queue" });
 
+    // Slash-command menu (skills) shown above the composer when the message starts with "/".
+    this.slashMenu = h("div", { class: "ab-slash" });
+
     // Composer
-    this.input = h("textarea", { class: "ab-input", rows: "1", placeholder: "Describe a change…" });
+    this.input = h("textarea", { class: "ab-input", rows: "1", placeholder: "Describe a change… (type / for skills)" });
+    this.input.addEventListener("input", function () { self._onComposerInput(); });
     this.input.addEventListener("keydown", function (e) {
+      // When the "/" skill menu is open, arrows/enter/tab/esc drive it instead of the composer.
+      if (self._slashOpen && self._onSlashKeydown(e)) return;
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); self._sendMessage(); }
     });
     this.stopBtn = h("button", { class: "ab-stop", title: "Stop the agent" });
@@ -291,7 +301,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     ]);
 
     var body = h("div", { class: "ab-body" }, [this.messages, this.drawer, this.pluginsPanel]);
-    var panel = h("div", { class: "ab-panel" }, [header, this.banner, controls, body, this.files, this.cardLayer, this.contextBar, this.queueBar, composer]);
+    var panel = h("div", { class: "ab-panel" }, [header, this.banner, controls, body, this.files, this.cardLayer, this.contextBar, this.queueBar, this.slashMenu, composer]);
     this.root.appendChild(this.bubble);
     this.root.appendChild(panel);
     this.shadow.appendChild(this.root);
@@ -595,6 +605,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       self._send({ type: "list_agents" });
       self._send({ type: "list_chats" });
       self._send({ type: "list_mcp" });
+      self._send({ type: "list_skills" });
     });
     this.ws.addEventListener("message", function (ev) {
       var msg;
@@ -663,6 +674,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       case "agents": return this._onAgents(msg.agents);
       case "chats": return this._onChats(msg.chats);
       case "live_chat": this.liveChatId = msg.chat_id; return this._renderChatList();
+      case "skills": this.skills = msg.skills || []; return;
       case "mcp_servers": return this._onMcpServers(msg.servers);
       case "session_started": return this._onSessionStarted(msg);
       case "chat_history": return this._onChatHistory(msg);
@@ -860,6 +872,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       return;
     }
     this.input.value = "";
+    this._hideSlash();
     var element = this.pendingElement || null;
     var attachments = this._readyAttachmentPaths();
     this._clearPendingElement();
@@ -936,6 +949,68 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
         h("span", { class: "ab-queue-text", text: item.text }), x,
       ]));
     });
+  };
+
+  // ---- Slash (/) skill menu -------------------------------------------- //
+
+  // Show the skill menu when the message is just "/<partial>" (no space yet), like Claude Code.
+  AgentBridgeWidget.prototype._onComposerInput = function () {
+    var m = /^\/(\S*)$/.exec(this.input.value);
+    if (!m || !this.skills.length) { this._hideSlash(); return; }
+    var q = m[1].toLowerCase();
+    this._slashItems = this.skills.filter(function (s) {
+      return !q || s.name.toLowerCase().indexOf(q) !== -1;
+    });
+    if (!this._slashItems.length) { this._hideSlash(); return; }
+    this._slashIdx = 0;
+    this._slashOpen = true;
+    this._renderSlash();
+  };
+
+  AgentBridgeWidget.prototype._renderSlash = function () {
+    var self = this;
+    this.slashMenu.innerHTML = "";
+    this.slashMenu.classList.add("show");
+    this._slashItems.forEach(function (s, i) {
+      var item = h("div", { class: "ab-slash-item" + (i === self._slashIdx ? " sel" : "") }, [
+        h("span", { class: "ab-slash-name", text: "/" + s.name }),
+        s.description ? h("span", { class: "ab-slash-desc", text: s.description }) : null,
+      ].filter(Boolean));
+      item.addEventListener("mousedown", function (e) { e.preventDefault(); self._acceptSlash(i); });
+      self.slashMenu.appendChild(item);
+    });
+  };
+
+  AgentBridgeWidget.prototype._hideSlash = function () {
+    if (!this._slashOpen && !this.slashMenu.classList.contains("show")) return;
+    this._slashOpen = false;
+    this._slashItems = [];
+    this.slashMenu.classList.remove("show");
+    this.slashMenu.innerHTML = "";
+  };
+
+  AgentBridgeWidget.prototype._acceptSlash = function (i) {
+    var s = this._slashItems[i];
+    if (!s) return;
+    this.input.value = "/" + s.name + " ";
+    this._hideSlash();
+    this.input.focus();
+  };
+
+  // Returns true if it handled the key (so the composer's own handler is skipped).
+  AgentBridgeWidget.prototype._onSlashKeydown = function (e) {
+    if (!this._slashOpen || !this._slashItems.length) return false;
+    if (e.key === "ArrowDown") {
+      e.preventDefault(); this._slashIdx = (this._slashIdx + 1) % this._slashItems.length; this._renderSlash(); return true;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault(); this._slashIdx = (this._slashIdx - 1 + this._slashItems.length) % this._slashItems.length; this._renderSlash(); return true;
+    }
+    if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault(); this._acceptSlash(this._slashIdx); return true;
+    }
+    if (e.key === "Escape") { e.preventDefault(); this._hideSlash(); return true; }
+    return false;
   };
 
   AgentBridgeWidget.prototype._toggleAutoApprove = function () {
