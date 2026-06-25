@@ -42,11 +42,13 @@ def list_agent_info() -> list[AgentInfo]:
     infos: list[AgentInfo] = []
     for name, cls in _ADAPTERS.items():
         available = cls.is_available()
-        # capabilities() is an instance method; adapters are cheap to construct.
+        # capabilities()/models() are instance methods; adapters are cheap to construct.
         try:
-            caps = cls(Path(".")).capabilities().as_dict()
+            inst = cls(Path("."))
+            caps = inst.capabilities().as_dict()
+            models = inst.models()
         except Exception:  # noqa: BLE001 — never let one adapter break the list
-            caps = {}
+            caps, models = {}, []
         infos.append(
             AgentInfo(
                 name=name,
@@ -54,6 +56,7 @@ def list_agent_info() -> list[AgentInfo]:
                 available=available,
                 capabilities=caps,
                 theme=dict(cls.theme),
+                models=models,
             )
         )
     return infos

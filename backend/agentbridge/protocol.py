@@ -24,6 +24,14 @@ from pydantic import BaseModel, Field, TypeAdapter
 # --------------------------------------------------------------------------- #
 
 
+class ModelOption(BaseModel):
+    """A selectable model for an agent. ``id`` is passed back as ``UserMessage.model`` (empty =
+    the agent's default); ``label`` is what the widget shows."""
+
+    id: str
+    label: str
+
+
 class AgentInfo(BaseModel):
     name: str
     label: str
@@ -33,6 +41,8 @@ class AgentInfo(BaseModel):
     #: Keys map to CSS variables: ``accent`` -> ``--ab-accent``, ``accentFg`` -> ``--ab-accent-fg``.
     #: Empty => the widget keeps its default accent.
     theme: dict[str, str] = Field(default_factory=dict)
+    #: Models the user can pick for this agent (empty => no model picker shown).
+    models: list[ModelOption] = Field(default_factory=list)
 
 
 class FileChange(BaseModel):
@@ -108,6 +118,8 @@ class UserMessage(BaseModel):
     # Working mode for this turn: "plan" (analyze + propose a plan, no changes) or "default"/None
     # for normal operation. Only honored by agents that advertise the plan_mode capability.
     mode: str | None = None
+    # Model to use for this turn (an id from the agent's advertised models; empty/None = default).
+    model: str | None = None
     # Workspace-relative paths of files the user attached to this turn (previously uploaded via
     # ``upload_file``). The server points the agent at them in the preamble.
     attachments: list[str] = Field(default_factory=list)

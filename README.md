@@ -130,6 +130,10 @@ For agents that support it (Claude Code), a **mode picker** in the controls row 
 - **Code** — normal operation; the agent makes changes directly (subject to approvals above).
 - **Plan** — the agent analyzes and proposes a plan **without making changes**. When it's done it surfaces the plan as an Allow / Deny card; approve to let it proceed (or switch back to **Code** and continue). The mode is sent per message and applied with the SDK's `permission_mode`, so you can switch freely between turns. The picker is hidden for agents that don't support modes (e.g. Cursor).
 
+### Model selection
+
+A **model picker** (next to the agent dropdown) lets you choose the model per message — for Claude Code: **Default / Opus / Sonnet / Haiku** (aliases, so they track the latest of each tier). It's applied at runtime via the SDK's `set_model`, so you can switch between turns (e.g. plan with Opus, iterate with Sonnet). The options are advertised by each agent, and the picker is hidden for agents that don't expose models.
+
 ### Workspace settings
 
 Agents run _in your workspace_ and honor its own configuration:

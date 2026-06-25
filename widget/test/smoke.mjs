@@ -235,26 +235,36 @@ async function main() {
 
   // --- Modes: the picker shows only for agents that support it, and rides on the message ---
   widget._onAgents([
-    { name: "claude-code", label: "Claude Code", available: true, capabilities: { plan_mode: true } },
-    { name: "cursor", label: "Cursor", available: true, capabilities: {} },
+    { name: "claude-code", label: "Claude Code", available: true, capabilities: { plan_mode: true },
+      models: [{ id: "", label: "Default" }, { id: "opus", label: "Opus" }, { id: "sonnet", label: "Sonnet" }] },
+    { name: "cursor", label: "Cursor", available: true, capabilities: {}, models: [] },
   ]);
   const modeSel = widget.shadow.querySelector(".ab-mode");
   assert.ok(modeSel, "mode select missing");
+  const modelSel = widget.shadow.querySelector(".ab-model");
+  assert.ok(modelSel, "model select missing");
   widget.sessionAgent = "claude-code"; widget.selectedAgent = "claude-code"; widget._applyTheme();
   assert.ok(!modeSel.hidden, "mode picker should show for a plan-capable agent");
+  assert.ok(!modelSel.hidden, "model picker should show for an agent that advertises models");
+  assert.equal(modelSel.options.length, 3, "model options should come from the agent");
   widget.sessionAgent = "cursor"; widget.selectedAgent = "cursor"; widget._applyTheme();
   assert.ok(modeSel.hidden, "mode picker should hide for an agent without plan mode");
-  // Plan mode rides along on the message for a capable agent; default mode is omitted.
+  assert.ok(modelSel.hidden, "model picker should hide for an agent with no models");
+  // Plan mode + model ride along on the message for a capable agent; defaults are omitted.
   widget.sessionAgent = "claude-code"; widget.selectedAgent = "claude-code"; widget._applyTheme();
   sent.length = 0; widget.activeChatId = "c1"; widget.running = false;
   widget.mode = "plan"; widget.modeSelect.value = "plan";
+  widget.modelId = "opus"; widget.modelSelect.value = "opus";
   widget.input.value = "plan the thing"; widget._sendMessage();
   let pmsg = sent.find((m) => m.type === "user_message");
   assert.equal(pmsg && pmsg.mode, "plan", "plan mode should be sent with the message");
+  assert.equal(pmsg && pmsg.model, "opus", "selected model should be sent with the message");
   sent.length = 0; widget.mode = "default"; widget.modeSelect.value = "default";
+  widget.modelId = ""; widget.modelSelect.value = "";
   widget.input.value = "code the thing"; widget._sendMessage();
   pmsg = sent.find((m) => m.type === "user_message");
   assert.ok(pmsg && pmsg.mode === undefined, "default mode should not be sent");
+  assert.ok(pmsg && pmsg.model === undefined, "default model should not be sent");
   widget.activeChatId = null; widget.sessionAgent = null; widget.selectedAgent = null;
 
   // --- Plugins (MCP): open the panel, list servers, add via the form, toggle, delete ---
@@ -356,7 +366,7 @@ async function main() {
   assert.equal(widget.root.style.left, "auto", "left should be released for a right anchor");
   assert.equal(widget.root.style.top, "auto", "top should be released for a bottom anchor");
 
-  console.log("OK — widget mounts, streams, renders markdown, resets, attaches files, selects modes, manages plugins, drags (panel + bubble), and themes per agent.");
+  console.log("OK — widget mounts, streams, renders markdown, resets, attaches files, selects model + mode, manages plugins, drags (panel + bubble), and themes per agent.");
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error("FAIL:", e.message); process.exit(1); });

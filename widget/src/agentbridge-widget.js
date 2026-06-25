@@ -58,6 +58,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   var LS_CHAT = "agentbridge:activeChat";
   var LS_AUTO = "agentbridge:autoApprove";
   var LS_MODE = "agentbridge:mode";   // working mode: "default" | "plan"
+  var LS_MODEL = "agentbridge:model"; // selected model id (agent-specific; "" = default)
   var LS_POS = "agentbridge:pos";   // dragged {left, top} of the widget
 
   function lsGet(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } }
@@ -117,6 +118,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this._inspecting = false;
     this.autoApprove = lsGet(LS_AUTO) !== "0";  // default ON; "0" = user turned it off
     this.mode = lsGet(LS_MODE) || "default";    // "default" (code) | "plan"
+    this.modelId = lsGet(LS_MODEL) || "";       // selected model id ("" = agent default)
     this._autoOpened = false;
     this._init();
   }
@@ -188,6 +190,9 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     // Controls: agent picker + PR + inspect
     this.agentSelect = h("select", { class: "ab-select", title: "Default agent for new chats" });
     this.agentSelect.addEventListener("change", function () { self._selectAgent(); });
+    // Model (options come from the active agent; shown only when it advertises models).
+    this.modelSelect = h("select", { class: "ab-select ab-model", title: "Model" });
+    this.modelSelect.addEventListener("change", function () { self._selectModel(); });
     // Working mode (shown only for agents that support it, e.g. Claude's plan mode).
     this.modeSelect = h("select", { class: "ab-select ab-mode", title: "Working mode" });
     this.modeSelect.appendChild(h("option", { value: "default", text: "Code" }));
@@ -211,7 +216,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.pluginsBtn.addEventListener("click", function () { self._togglePlugins(); });
     this.branchLabel = h("span", { class: "ab-branch-label" });
     var controls = h("div", { class: "ab-controls" }, [
-      this.agentSelect, this.modeSelect, this.prBtn, this.inspectBtn, this.autoBtn, this.pluginsBtn, this.branchLabel,
+      this.agentSelect, this.modelSelect, this.modeSelect, this.prBtn, this.inspectBtn, this.autoBtn, this.pluginsBtn, this.branchLabel,
     ]);
     this._refreshAutoApproveBtn();
 
@@ -843,6 +848,11 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     if (this.mode && this.mode !== "default" && this._activeAgentCaps().plan_mode) {
       payload.mode = this.mode;
     }
+    // Send a non-default model only when the active agent advertises models.
+    var agent = this._activeAgent();
+    if (this.modelId && agent && (agent.models || []).length) {
+      payload.model = this.modelId;
+    }
     if (attachments && attachments.length) payload.attachments = attachments;
     this._send(payload);
   };
@@ -1432,21 +1442,54 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       else this.root.style.removeProperty(vars[key]);
     }
     this._updateModeVisibility();
+    this._updateModelOptions();
+  };
+
+  // The agent record currently in effect, or null.
+  AgentBridgeWidget.prototype._activeAgent = function () {
+    var name = this._activeAgentName();
+    for (var i = 0; i < this.agents.length; i++) {
+      if (this.agents[i].name === name) return this.agents[i];
+    }
+    return null;
   };
 
   // Capabilities of the agent currently in effect, or {} if unknown.
   AgentBridgeWidget.prototype._activeAgentCaps = function () {
-    var name = this._activeAgentName();
-    for (var i = 0; i < this.agents.length; i++) {
-      if (this.agents[i].name === name) return this.agents[i].capabilities || {};
-    }
-    return {};
+    var a = this._activeAgent();
+    return (a && a.capabilities) || {};
   };
 
   // Only show the mode picker for agents that support modes (e.g. Claude's plan mode).
   AgentBridgeWidget.prototype._updateModeVisibility = function () {
     if (!this.modeSelect) return;
     this.modeSelect.hidden = !this._activeAgentCaps().plan_mode;
+  };
+
+  // Populate the model picker from the active agent's advertised models; hide it if none.
+  AgentBridgeWidget.prototype._updateModelOptions = function () {
+    if (!this.modelSelect) return;
+    var a = this._activeAgent();
+    var models = (a && a.models) || [];
+    this.modelSelect.hidden = !models.length;
+    if (!models.length) return;
+    this.modelSelect.innerHTML = "";
+    var ids = [];
+    var self = this;
+    models.forEach(function (m) {
+      ids.push(m.id);
+      self.modelSelect.appendChild(h("option", { value: m.id, text: m.label }));
+    });
+    // Keep the saved choice if this agent still offers it; otherwise fall back to its default.
+    if (ids.indexOf(this.modelId) === -1) this.modelId = ids[0] || "";
+    this.modelSelect.value = this.modelId;
+  };
+
+  AgentBridgeWidget.prototype._selectModel = function () {
+    this.modelId = this.modelSelect.value || "";
+    lsSet(LS_MODEL, this.modelId);
+    var label = this.modelSelect.options[this.modelSelect.selectedIndex];
+    this._system("Model set to " + ((label && label.text) || "default") + " for new messages.");
   };
 
   AgentBridgeWidget.prototype._selectMode = function () {

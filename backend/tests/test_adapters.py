@@ -59,6 +59,20 @@ def test_claude_advertises_plan_mode(tmp_path: Path):
     assert ClaudeCodeAdapter(tmp_path).capabilities().plan_mode is True
 
 
+def test_set_model_normalizes(tmp_path: Path):
+    a = ClaudeCodeAdapter(tmp_path)
+    assert a._model_id is None
+    a.set_model("opus"); assert a._model_id == "opus"
+    a.set_model("  sonnet "); assert a._model_id == "sonnet"
+    a.set_model(""); assert a._model_id is None       # "Default" choice
+    a.set_model(None); assert a._model_id is None
+
+
+def test_claude_advertises_models(tmp_path: Path):
+    ids = [m["id"] for m in ClaudeCodeAdapter(tmp_path).models()]
+    assert ids[0] == "" and {"opus", "sonnet", "haiku"} <= set(ids)
+
+
 def _make_session(tmp_path: Path, send, agent: str = "fake") -> Session:
     store = ChatStore(tmp_path)
     record = store.create(agent=agent, title="t")

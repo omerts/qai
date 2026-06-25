@@ -113,6 +113,11 @@ class AgentAdapter(ABC):
     def capabilities(self) -> Capabilities:
         ...
 
+    def models(self) -> list[dict[str, str]]:
+        """Selectable models for this agent as ``[{"id", "label"}]`` (id ``""`` = the agent's
+        default). Empty (the default) => the widget shows no model picker."""
+        return []
+
     @abstractmethod
     async def start(self, ctx: SessionContext) -> None:
         """Prepare the agent for a session (spawn process / open SDK client)."""
@@ -158,6 +163,11 @@ class AgentAdapter(ABC):
         operation. Only meaningful for adapters whose ``capabilities().plan_mode`` is True;
         the default is a no-op.
         """
+        return None
+
+    def set_model(self, model: str | None) -> None:
+        """Choose the model for upcoming turns (an id from :meth:`models`, or ``None``/empty for
+        the agent's default). Only meaningful for adapters that advertise models; default no-op."""
         return None
 
     async def interrupt(self) -> bool:

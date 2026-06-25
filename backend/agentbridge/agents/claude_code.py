@@ -199,6 +199,8 @@ class ClaudeCodeAdapter(AgentAdapter):
         self._mcp_servers: dict = {}       # user-registered MCP servers (plugins), {name: config}
         self._mode: str = "default"        # SDK permission_mode for the next turn ("plan" etc.)
         self._applied_mode: str | None = None  # last mode pushed to the live client
+        self._model_id: str | None = None  # selected model alias/id for the next turn (None=default)
+        self._applied_model: str | None = None  # last model pushed to the live client
 
     @classmethod
     def is_available(cls) -> bool:
@@ -206,6 +208,15 @@ class ClaudeCodeAdapter(AgentAdapter):
 
     def capabilities(self) -> Capabilities:
         return Capabilities(streaming=True, interactive=True, edits_files=True, plan_mode=True)
+
+    def models(self) -> list[dict[str, str]]:
+        # Aliases (not pinned ids) so they track the latest of each tier as the CLI updates.
+        return [
+            {"id": "", "label": "Default"},
+            {"id": "opus", "label": "Opus"},
+            {"id": "sonnet", "label": "Sonnet"},
+            {"id": "haiku", "label": "Haiku"},
+        ]
 
     async def start(self, ctx: SessionContext) -> None:
         self._resume = ctx.resume
@@ -231,6 +242,7 @@ class ClaudeCodeAdapter(AgentAdapter):
             cwd=str(self.workspace),
             permission_mode="default",  # 'default' => edits/bash route through can_use_tool
             can_use_tool=self._can_use_tool,
+            model=self._model_id or None,  # None => account/CLI default; switched per turn via set_model
             resume=self._resume,  # continue a prior conversation when reopening a chat
             # Which settings to load from disk (see _setting_sources); defaults to user,project
             # so we never read or write the workspace's .claude/settings.local.json.
@@ -262,6 +274,24 @@ class ClaudeCodeAdapter(AgentAdapter):
         if m in ("", "code"):
             m = "default"
         self._mode = m if m in _VALID_MODES else "default"
+
+    def set_model(self, model: str | None) -> None:
+        self._model_id = (model or "").strip() or None
+
+    async def _apply_model(self) -> None:
+        """Push the selected model to the live client before a turn (runtime switch); only on change."""
+        if self._client is None or self._model_id == self._applied_model:
+            return
+        setter = getattr(self._client, "set_model", None)
+        if setter is None:
+            if self._model_id:
+                _log.warning("Installed claude-agent-sdk has no set_model; '%s' ignored.", self._model_id)
+            return
+        try:
+            await setter(self._model_id)   # None => the account/CLI default
+            self._applied_model = self._model_id
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("Failed to set model '%s': %s", self._model_id, exc)
 
     async def _apply_mode(self) -> None:
         """Push the selected permission mode to the live client before a turn. The SDK applies it
@@ -402,7 +432,8 @@ class ClaudeCodeAdapter(AgentAdapter):
             yield AgentEvent.error("Claude Code session is not started.")
             return
 
-        await self._apply_mode()  # honor the selected mode (e.g. plan) for this turn
+        await self._apply_mode()   # honor the selected mode (e.g. plan) for this turn
+        await self._apply_model()  # honor the selected model for this turn
 
         queue: asyncio.Queue[AgentEvent] = asyncio.Queue()
         self._queue = queue
