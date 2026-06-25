@@ -339,7 +339,12 @@ class Session:
             await self.send(P.ErrorMessage(message=text, chat_id=self.chat_id))
             return
 
-        title, body = self._pr_meta(msg.title, msg.body, touched)
+        # Have the model write the title/description (isolated one-shot), with a deterministic
+        # fallback. Only when the user didn't type both fields already.
+        gen_title = gen_summary = None
+        if not ((msg.title or "").strip() and (msg.body or "").strip()):
+            gen_title, gen_summary = await self._model_pr(touched)
+        title, body = self._pr_meta(msg.title, msg.body, touched, gen_title=gen_title, gen_summary=gen_summary)
         branch = self.record.target_branch or self.git.suggest_branch_name(title)
         try:
             # The whole sequence is blocking work — git subprocesses plus a synchronous GitHub
@@ -479,23 +484,83 @@ class Session:
         re.I,
     )
 
-    def _pr_meta(self, user_title: str | None, user_body: str | None, touched: list[str]) -> tuple[str, str]:
-        """Resolve the PR title and body. A title/body the user typed always wins. Otherwise the
-        title is derived from the user's *request* (the most reliable one-line intent — the agent's
-        reply is verbose and often opens with filler), falling back to the agent summary; the body
-        is the agent's summary with that filler preamble stripped, plus the files it changed."""
+    def _pr_meta(
+        self,
+        user_title: str | None,
+        user_body: str | None,
+        touched: list[str],
+        gen_title: str | None = None,
+        gen_summary: str | None = None,
+    ) -> tuple[str, str]:
+        """Resolve the PR title and body. Precedence: what the user typed, then what the model
+        wrote (``gen_*``), then a deterministic fallback (title from the user's request; body from
+        the agent's summary with its filler preamble stripped). The changed-file list and footer
+        are always appended to a derived body."""
         summary = self._last_agent_text()
         title = (user_title or "").strip()
         if not title:
             title = (
-                self._title_from_request(self._first_user_text())
+                (gen_title or "").strip()
+                or self._title_from_request(self._first_user_text())
                 or self._title_from_summary(summary)
                 or (self.record.title or "").strip()
                 or "AgentBridge changes"
             )
         title = re.sub(r"\s+", " ", title).strip().strip('"').rstrip(".:")[:72] or "AgentBridge changes"
-        body = (user_body or "").strip() or self._build_pr_body(summary, touched)
+        body = (user_body or "").strip() or self._build_pr_body((gen_summary or summary), touched)
         return title, body
+
+    async def _model_pr(self, touched: list[str]) -> tuple[str | None, str | None]:
+        """Ask the agent to write a PR title + description, isolated from the chat session. Returns
+        (title, summary), or (None, None) if unavailable/failed — caller falls back to heuristics."""
+        adapter = self.adapter
+        if adapter is None:
+            try:
+                adapter = create_adapter(self.record.agent, self.workspace)
+            except Exception:  # noqa: BLE001
+                return None, None
+        try:
+            text = await adapter.summarize_pr(self._pr_prompt(touched))
+        except Exception:  # noqa: BLE001 — never let summary generation break PR creation
+            return None, None
+        if not text:
+            return None, None
+        return self._parse_model_pr(text)
+
+    def _pr_prompt(self, touched: list[str]) -> str:
+        request = self._first_user_text() or (self.record.title or "")
+        summary = self._last_agent_text()
+        files = "\n".join(f"- {p}" for p in sorted(touched)) or "(none reported)"
+        return (
+            "Write a GitHub pull request title and description for this change. Be concise and "
+            "specific; describe what changed and why, not the conversation.\n\n"
+            f"User's request:\n{request}\n\n"
+            f"What the coding agent reported doing:\n{summary}\n\n"
+            f"Files changed:\n{files}\n\n"
+            "Respond with ONLY:\n"
+            "- Line 1: a concise, imperative PR title (max 72 chars, no trailing period).\n"
+            "- Then a blank line.\n"
+            "- Then the PR description in GitHub markdown: a one or two sentence overview, then a "
+            "short bullet list of the key changes.\n"
+            "Do not include a 'Files changed' section, code fences around the whole answer, or any "
+            "preamble like 'Here's the PR'. Do not use tools or ask questions."
+        )
+
+    @staticmethod
+    def _parse_model_pr(text: str) -> tuple[str | None, str | None]:
+        """Split the model's reply into (title, body): first non-empty line is the title."""
+        lines = text.strip().splitlines()
+        title, idx = "", 0
+        for i, line in enumerate(lines):
+            if line.strip():
+                title = re.sub(r"[`*_#>]+", "", line).strip()
+                title = re.sub(r"^(pr )?title\s*[:\-]\s*", "", title, flags=re.I)
+                title = title.strip().strip('"').rstrip(".:")
+                idx = i + 1
+                break
+        summary = "\n".join(lines[idx:]).strip()
+        summary = re.sub(r"^(description|body|summary)\s*[:\-]\s*", "", summary, flags=re.I).strip()
+        return (title[:72] or None), (summary or None)
 
     def _first_user_text(self) -> str:
         for entry in self.record.transcript:

@@ -232,6 +232,28 @@ def test_pr_title_auto_derived_from_request(client):
     assert "Added feature.txt" in payload["body"]  # and carries the agent's summary
 
 
+def test_pr_title_body_written_by_model(client, monkeypatch):
+    """When the agent can write the PR, its title/description are used (files + footer appended)."""
+    async def fake_summarize(self, prompt):
+        assert "feature.txt" in prompt   # the model gets the changed files as context
+        return ("Add a shiny feature\n\n"
+                "Introduces a shiny feature for users.\n\n- Adds feature.txt with the new behavior")
+
+    monkeypatch.setattr(FakeAdapter, "summarize_pr", fake_summarize)
+    tc, repo, pr_payloads = client
+    with tc.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "start_session", "agent": "fake", "title": "feat"})
+        chat_id = _recv_until(ws, "session_started")["chat_id"]
+        ws.send_json({"type": "user_message", "chat_id": chat_id, "text": "add a feature"})
+        _recv_until(ws, "file_changes")
+        ws.send_json({"type": "create_pr", "chat_id": chat_id})
+        _recv_until(ws, "pr_created")
+    payload = pr_payloads[-1]
+    assert payload["title"] == "Add a shiny feature"                 # model's title
+    assert "Introduces a shiny feature for users." in payload["body"]  # model's description
+    assert "`feature.txt`" in payload["body"]                       # files still appended deterministically
+
+
 def test_interactive_prompt_round_trip(client):
     """The turn blocks on a prompt; the server must still receive agent_response and
     route it so the turn can complete. This validates concurrent message handling."""

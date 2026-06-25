@@ -304,6 +304,40 @@ class ClaudeCodeAdapter(AgentAdapter):
                 future.set_result("deny")
         self._pending.clear()
 
+    async def summarize_pr(self, prompt: str) -> str | None:
+        """Generate PR text with a one-shot ``query()`` — a fresh, isolated run that does NOT touch
+        the live ClaudeSDKClient session (so the chat's context and resume id are untouched). Text
+        only: no filesystem settings, no tools. Returns the model's reply, or None on any failure.
+        """
+        if not _sdk_installed():
+            return None
+        try:
+            from claude_agent_sdk import ClaudeAgentOptions, query  # type: ignore
+        except Exception:  # noqa: BLE001
+            return None
+        options = ClaudeAgentOptions(
+            cwd=str(self.workspace),
+            setting_sources=None,   # don't load project settings/MCP for a plain text generation
+            allowed_tools=[],       # text only — the context is in the prompt
+        )
+        chunks: list[str] = []
+        try:
+            async for message in query(prompt=prompt, options=options):
+                result = getattr(message, "result", None)
+                if result and not getattr(message, "is_error", False):
+                    chunks.append(str(result))
+                    continue
+                content = getattr(message, "content", None)
+                if isinstance(content, list):
+                    for block in content:
+                        text = getattr(block, "text", None)
+                        if text:
+                            chunks.append(str(text))
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("PR summary generation failed: %s", exc)
+            return None
+        return "".join(chunks).strip() or None
+
     # ------------------------------------------------------------------ #
     # Interactive permission callback
     # ------------------------------------------------------------------ #

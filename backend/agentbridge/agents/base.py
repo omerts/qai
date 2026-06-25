@@ -167,6 +167,13 @@ class AgentAdapter(ABC):
         """
         return False
 
+    async def summarize_pr(self, prompt: str) -> str | None:
+        """One-shot text generation for a PR title/description, isolated from the chat session (it
+        must NOT use or advance the live conversation). Returns the model's text, or None if the
+        adapter can't do it — in which case the caller falls back to a deterministic summary.
+        """
+        return None
+
 
 class AgentUnavailableError(RuntimeError):
     """Raised when an adapter is selected but its backing tool is not installed."""

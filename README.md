@@ -147,7 +147,7 @@ Agents run _in your workspace_ and honor its own configuration:
 
 **Only the agent's changes are committed.** Files you've edited yourself, or other pre-existing changes in the repo, stay in your workspace and are never swept into the PR.
 
-**Meaningful PR titles.** Type a title before clicking Create PR to set it; otherwise AgentBridge derives one (and a body listing the changed files) from the agent's own summary of what it did.
+**Meaningful PR titles & descriptions.** Type a title (and/or body) before clicking Create PR to set them. Otherwise the agent **writes the PR title and description** for you — a concise, isolated one-shot generation that doesn't touch your chat session — and the changed-file list is appended. If the model isn't available it falls back to a deterministic summary (title from your request, body from the agent's cleaned-up summary).
 
 ### What the agent sees (page context)
 
