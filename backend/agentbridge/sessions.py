@@ -416,7 +416,9 @@ class Session:
         gen_title = gen_summary = None
         if not ((msg.title or "").strip() and (msg.body or "").strip()):
             gen_title, gen_summary = await self._model_pr(files_for_meta)
-        title, body = self._pr_meta(msg.title, msg.body, files_for_meta, gen_title=gen_title, gen_summary=gen_summary)
+        title, body = self._pr_meta(
+            msg.title, msg.body, files_for_meta, gen_title=gen_title, gen_summary=gen_summary, notes=msg.notes,
+        )
         branch = self.record.worktree_branch
         try:
             # Blocking git + a synchronous GitHub call — run off the event loop.
@@ -561,6 +563,7 @@ class Session:
         touched: list[str],
         gen_title: str | None = None,
         gen_summary: str | None = None,
+        notes: str | None = None,
     ) -> tuple[str, str]:
         """Resolve the PR title and body. Precedence: what the user typed, then what the model
         wrote (``gen_*``), then a deterministic fallback (title from the user's request; body from
@@ -579,7 +582,12 @@ class Session:
         title = re.sub(r"\s+", " ", title).strip().strip('"').rstrip(".:")[:72] or "AgentBridge changes"
         if title and title[0].islower():   # PR titles read better capitalized
             title = title[0].upper() + title[1:]
-        body = (user_body or "").strip() or self._build_pr_body((gen_summary or summary), touched)
+        notes = (notes or "").strip()
+        body = (user_body or "").strip()
+        if body:
+            body = f"{body}\n\n{notes}" if notes else body
+        else:
+            body = self._build_pr_body((gen_summary or summary), touched, notes)
         return title, body
 
     async def _model_pr(self, touched: list[str]) -> tuple[str | None, str | None]:
@@ -685,7 +693,7 @@ class Session:
         return "\n".join(lines[i:]).strip()
 
     @classmethod
-    def _build_pr_body(cls, summary: str, touched: list[str]) -> str:
+    def _build_pr_body(cls, summary: str, touched: list[str], notes: str = "") -> str:
         parts: list[str] = []
         cleaned = cls._strip_summary_preamble(summary)
         if cleaned:
@@ -693,6 +701,8 @@ class Session:
         if touched:
             files = "\n".join(f"- `{p}`" for p in sorted(touched))
             parts.append(f"## Files changed\n\n{files}")
+        if notes and notes.strip():
+            parts.append(notes.strip())   # user-configured PR notes, before the footer
         parts.append("_Opened via AgentBridge._")
         return "\n\n".join(parts)
 

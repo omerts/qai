@@ -298,6 +298,14 @@ def test_pr_meta_drops_agent_filler(tmp_path: Path, monkeypatch):
     assert "`src/InlineCode.tsx`" in body          # files listed
     assert "## Summary" in body and "## Files changed" in body
 
+    # Configured PR notes are appended (before the footer) for derived bodies, and after a
+    # user-typed body.
+    _, body2 = session._pr_meta(None, None, ["src/InlineCode.tsx"], notes="Ticket: ABC-123")
+    assert "Ticket: ABC-123" in body2
+    assert body2.index("Ticket: ABC-123") < body2.index("_Opened via AgentBridge._")
+    _, body3 = session._pr_meta("My title", "My own body.", [], notes="Ticket: ABC-123")
+    assert body3 == "My own body.\n\nTicket: ABC-123"
+
 
 async def test_session_pr_failure_preserves_changes_then_retry_succeeds(tmp_path: Path, monkeypatch):
     """A failed PR must NOT lose the agent's work: the change stays in the chat's worktree and a

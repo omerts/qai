@@ -60,6 +60,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   var LS_MODE = "agentbridge:mode";   // working mode: "default" | "plan"
   var LS_MODEL = "agentbridge:model"; // selected model id (agent-specific; "" = default)
   var LS_EFFORT = "agentbridge:effort"; // selected reasoning-effort id ("" = default)
+  var LS_PR_NOTES = "agentbridge:prNotes"; // notes appended to every PR description
   var LS_POS = "agentbridge:pos";   // dragged {left, top} of the widget
 
   function lsGet(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } }
@@ -123,6 +124,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.mode = lsGet(LS_MODE) || "default";    // "default" (code) | "plan"
     this.modelId = lsGet(LS_MODEL) || "";       // selected model id ("" = agent default)
     this.effortId = lsGet(LS_EFFORT) || "";     // selected reasoning effort ("" = agent default)
+    this.prNotes = lsGet(LS_PR_NOTES) || "";    // notes appended to every PR description
     this._autoOpened = false;
     this._init();
   }
@@ -218,8 +220,8 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.autoBtn.addEventListener("click", function () { self._toggleAutoApprove(); });
     this.pluginsBtn = h("button", { class: "ab-iconbtn ab-pluginsbtn ab-tip" });
     this.pluginsBtn.innerHTML = PLUGIN_ICON;
-    this.pluginsBtn.setAttribute("data-tip", "Plugins — connect MCP servers like Figma for the agent to use.");
-    this.pluginsBtn.setAttribute("aria-label", "Plugins");
+    this.pluginsBtn.setAttribute("data-tip", "Settings — plugins (MCP) and PR description notes.");
+    this.pluginsBtn.setAttribute("aria-label", "Settings");
     this.pluginsBtn.addEventListener("click", function () { self._togglePlugins(); });
     this.branchLabel = h("span", { class: "ab-branch-label" });
     var controls = h("div", { class: "ab-controls" }, [
@@ -439,10 +441,24 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     var close = h("button", { class: "ab-iconbtn", title: "Close", text: "✕" });
     close.addEventListener("click", function () { self._togglePlugins(false); });
     var head = h("div", { class: "ab-plugins-head" }, [
-      h("span", { class: "ab-plugins-title", text: "Plugins" }), close,
+      h("span", { class: "ab-plugins-title", text: "Settings" }), close,
     ]);
+
+    // PR notes: free-text appended to every PR description (persisted per-browser).
+    this.prNotesInput = h("textarea", { class: "ab-input ab-prnotes", rows: "3",
+      placeholder: "Notes appended to every PR description (e.g. ticket ref, reviewer checklist)…" });
+    this.prNotesInput.value = this.prNotes || "";
+    this.prNotesInput.addEventListener("input", function () {
+      self.prNotes = self.prNotesInput.value;
+      lsSet(LS_PR_NOTES, self.prNotes);
+    });
+    var prSection = h("div", { class: "ab-settings-section" }, [
+      h("div", { class: "ab-settings-label", text: "PR description notes" }),
+      this.prNotesInput,
+    ]);
+
     var intro = h("div", { class: "ab-plugins-intro", text:
-      "Connect MCP servers for the agent to use. Changes apply to new or restarted chats." });
+      "Plugins — connect MCP servers for the agent to use. Changes apply to new or restarted chats." });
     this.pluginsList = h("div", { class: "ab-plugins-list" });
     // Quick-add presets + a manual "Add server" toggle.
     var figma = h("button", { class: "ab-btn ab-plugins-preset", text: "+ Figma",
@@ -458,7 +474,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     addBtn.addEventListener("click", function () { self._openPluginForm(null); });
     var presets = h("div", { class: "ab-plugins-presets" }, [figma, figmaDev, figmaKey, addBtn]);
     this.pluginForm = h("div", { class: "ab-plugin-form" });   // populated by _openPluginForm
-    this.pluginsPanel = h("div", { class: "ab-plugins" }, [head, intro, this.pluginsList, presets, this.pluginForm]);
+    this.pluginsPanel = h("div", { class: "ab-plugins" }, [head, prSection, intro, this.pluginsList, presets, this.pluginForm]);
   };
 
   AgentBridgeWidget.prototype._togglePlugins = function (force) {
@@ -954,6 +970,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.input.value = "";
     var msg = { type: "create_pr", chat_id: this.activeChatId };
     if (typed) msg.title = typed;
+    if (this.prNotes && this.prNotes.trim()) msg.notes = this.prNotes;   // configured PR notes
     this._send(msg);
     this._system(typed ? "Creating pull request…" : "Summarizing changes and creating pull request…");
   };

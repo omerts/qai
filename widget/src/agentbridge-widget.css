@@ -300,6 +300,9 @@
   padding: 10px 12px; border-bottom: 1px solid var(--ab-border);
 }
 .ab-plugins-title { font-weight: 600; font-size: 13px; }
+.ab-settings-section { padding: 10px 12px; border-bottom: 1px solid var(--ab-border); }
+.ab-settings-label { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.ab-prnotes { width: 100%; resize: vertical; min-height: 52px; max-height: 160px; }
 .ab-plugins-intro { padding: 10px 12px; color: var(--ab-muted); font-size: 12px; }
 .ab-plugins-list { display: flex; flex-direction: column; }
 .ab-plugins-empty { padding: 4px 12px 10px; color: var(--ab-muted); font-size: 13px; }

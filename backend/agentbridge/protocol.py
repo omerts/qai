@@ -164,6 +164,9 @@ class CreatePR(BaseModel):
     # from the agent's own summary of the changes it made.
     title: str | None = None
     body: str | None = None
+    # Custom notes (configured in the widget) appended to every PR description — e.g. a reviewer
+    # checklist or ticket reference.
+    notes: str | None = None
 
 
 class EndSession(BaseModel):

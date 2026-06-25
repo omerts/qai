@@ -156,6 +156,8 @@ Agents run _in your workspace_ and honor its own configuration:
 
 **Meaningful PR titles & descriptions.** Type a title (and/or body) before clicking Create PR to set them. Otherwise the agent **writes the PR title and description** for you — a concise, isolated one-shot generation that doesn't touch your chat session — and the changed-file list is appended. If the model isn't available it falls back to a deterministic summary (title from your request, body from the agent's cleaned-up summary).
 
+**Custom PR notes.** The settings panel (puzzle icon) has a **PR description notes** field — free text (a ticket reference, a reviewer checklist, …) that's appended to **every** PR description. It's saved in your browser and applied automatically, on top of whatever title/body is used.
+
 ### What the agent sees (page context)
 
 With every message the widget attaches lightweight **browser context**: the current route/URL, detected framework + version, page title, and components on the page. Use the **crosshair (inspect) button** to click any element — its tag, selector, and text are attached, and AgentBridge resolves it to a real file in your repo so the agent goes straight there instead of searching:

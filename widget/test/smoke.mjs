@@ -349,6 +349,18 @@ async function main() {
   // Delete sends delete_mcp.
   widget.shadow.querySelector(".ab-plugin-row .ab-chip-x").click();
   assert.ok(sent.some((m) => m.type === "delete_mcp" && m.name === "figma"), "delete_mcp not sent");
+  // PR notes config: editing the field persists it and it rides along on Create PR.
+  const prNotes = widget.shadow.querySelector(".ab-prnotes");
+  assert.ok(prNotes, "PR notes field missing in settings");
+  prNotes.value = "Ticket: ABC-123";
+  prNotes.dispatchEvent(new window.Event("input"));
+  assert.equal(widget.prNotes, "Ticket: ABC-123", "PR notes not captured");
+  sent.length = 0; widget.activeChatId = "c1";
+  widget._createPR();
+  const prMsg = sent.find((m) => m.type === "create_pr");
+  assert.ok(prMsg && prMsg.notes === "Ticket: ABC-123", "PR notes not sent with create_pr");
+  widget.activeChatId = null;
+
   widget._togglePlugins(false);
   assert.ok(!pluginsPanel.classList.contains("open"), "plugins panel should close");
 
