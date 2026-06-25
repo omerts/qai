@@ -88,6 +88,11 @@ def test_claude_advertises_efforts(tmp_path: Path):
     assert ids[0] == "" and {"low", "medium", "high", "max"} <= set(ids)
 
 
+def test_prompt_event_carries_title():
+    ev = AgentEvent.prompt("r1", "Pick a framework", options=["React", "Vue"], title="The agent is asking")
+    assert ev.kind == "prompt" and ev.options == ["React", "Vue"] and ev.title == "The agent is asking"
+
+
 def _make_session(tmp_path: Path, send, agent: str = "fake") -> Session:
     store = ChatStore(tmp_path)
     record = store.create(agent=agent, title="t")

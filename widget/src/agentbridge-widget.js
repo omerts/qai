@@ -1320,7 +1320,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
         b.addEventListener("click", function () { reply(opt); });
         return b;
       });
-      var card = this._card("Agent needs your approval", msg.prompt, buttons);
+      var card = this._card(msg.title || "Agent needs your approval", msg.prompt, buttons);
       return;
     }
 
@@ -1328,7 +1328,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     var send = h("button", { class: "ab-btn primary", text: "Reply" });
     send.addEventListener("click", function () { reply(input.value); });
     input.addEventListener("keydown", function (e) { if (e.key === "Enter") reply(input.value); });
-    var card = this._card("Agent needs input", msg.prompt, [send]);
+    var card = this._card(msg.title || "Agent needs input", msg.prompt, [send]);
     card.insertBefore(input, card.querySelector(".ab-card-actions"));
     input.focus();
   };

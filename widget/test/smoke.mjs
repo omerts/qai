@@ -277,6 +277,20 @@ async function main() {
   assert.ok(pmsg && pmsg.effort === undefined, "default effort should not be sent");
   widget.activeChatId = null; widget.sessionAgent = null; widget.selectedAgent = null;
 
+  // --- Agent question: a prompt with options renders a titled card; picking sends the answer ---
+  sent.length = 0; widget.activeChatId = "c1";
+  widget._onPrompt({ chat_id: "c1", request_id: "q1", title: "The agent is asking",
+    prompt: "Which framework?", options: ["React", "Vue", "Svelte"] });
+  const qCard = widget.shadow.querySelector(".ab-card");
+  assert.ok(qCard && /The agent is asking/.test(qCard.textContent), "question card title missing");
+  assert.ok(/Which framework\?/.test(qCard.textContent), "question text missing");
+  const optBtns = qCard.querySelectorAll(".ab-card-actions .ab-btn");
+  assert.equal(optBtns.length, 3, "one button per offered answer");
+  optBtns[1].click();   // pick "Vue"
+  const ans = sent.find((m) => m.type === "agent_response");
+  assert.ok(ans && ans.request_id === "q1" && ans.answer === "Vue", "selected answer not sent");
+  widget.activeChatId = null;
+
   // --- Plugins (MCP): open the panel, list servers, add via the form, toggle, delete ---
   sent.length = 0;
   widget._togglePlugins(true);
@@ -376,7 +390,7 @@ async function main() {
   assert.equal(widget.root.style.left, "auto", "left should be released for a right anchor");
   assert.equal(widget.root.style.top, "auto", "top should be released for a bottom anchor");
 
-  console.log("OK — widget mounts, streams, renders markdown, resets, attaches files, selects model + effort + mode, manages plugins, drags (panel + bubble), and themes per agent.");
+  console.log("OK — widget mounts, streams, renders markdown, resets, attaches files, answers agent questions, selects model + effort + mode, manages plugins, drags (panel + bubble), and themes per agent.");
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error("FAIL:", e.message); process.exit(1); });

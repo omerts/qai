@@ -420,7 +420,10 @@ class Session:
                 self.record.touched.append(rel)
         elif event.kind == "prompt" and event.request_id:
             await self.send(
-                P.AgentPrompt(chat_id=self.chat_id, request_id=event.request_id, prompt=event.text, options=event.options)
+                P.AgentPrompt(
+                    chat_id=self.chat_id, request_id=event.request_id, prompt=event.text,
+                    options=event.options, title=event.title,
+                )
             )
         elif event.kind == "error":
             await self.send(P.ErrorMessage(message=event.text, chat_id=self.chat_id))

@@ -261,12 +261,16 @@ class ClaudeCodeAdapter(AgentAdapter):
             # Which settings to load from disk (see _setting_sources); defaults to user,project
             # so we never read or write the workspace's .claude/settings.local.json.
             setting_sources=_setting_sources(),
-            # User-registered plugins (Figma, …). These merge with any the workspace's own
-            # .mcp.json already provides. MCP tools route through can_use_tool like any other.
-            mcp_servers=self._mcp_servers,
+            # User-registered plugins (Figma, …) plus our in-process ask_user tool. These merge
+            # with any the workspace's own .mcp.json provides. MCP tools route through
+            # can_use_tool like any other.
+            mcp_servers=self._mcp_servers_with_ask(),
             # Disable the OS bash sandbox by default — it can't initialize in the container and
             # would block every Bash command (see _sandbox_enabled).
             sandbox={"enabled": _sandbox_enabled()},
+            # Built-in AskUserQuestion can't render in headless/SDK mode (it auto-resolves empty),
+            # so disable it; the model uses our ask_user tool instead.
+            disallowed_tools=["AskUserQuestion"],
         )
         if self._effort:
             opt_kwargs["effort"] = self._effort
@@ -285,6 +289,46 @@ class ClaudeCodeAdapter(AgentAdapter):
         else:
             _log.info("Claude session starting with no user MCP servers configured.")
         return ClaudeSDKClient(options=options)
+
+    def _mcp_servers_with_ask(self) -> dict:
+        """User MCP servers plus our in-process ``ask_user`` tool (under the ``agentbridge``
+        server), if the SDK supports SDK MCP servers. Falls back to just the user servers."""
+        servers = dict(self._mcp_servers)
+        ask = self._build_ask_server()
+        if ask is not None:
+            servers["agentbridge"] = ask
+        return servers
+
+    def _build_ask_server(self):
+        """An SDK MCP server exposing ``ask_user`` — the model's way to ask the user a question
+        with selectable answers (the built-in AskUserQuestion can't render headless). The handler
+        reuses :meth:`_ask`, so the question shows in the widget and blocks until the user picks.
+        Returns None if the installed SDK doesn't support in-process tools."""
+        try:
+            from claude_agent_sdk import create_sdk_mcp_server, tool  # type: ignore
+        except Exception:  # noqa: BLE001
+            return None
+        adapter = self
+
+        @tool(
+            "ask_user",
+            "Ask the user a question and get their chosen answer. Use this whenever you need the "
+            "user to decide between options or clarify intent, instead of only asking in plain text.",
+            {"question": str, "options": list},
+        )
+        async def ask_user(args):  # noqa: ANN001
+            data = args or {}
+            question = str(data.get("question") or "").strip() or "The agent has a question."
+            raw = data.get("options") or []
+            options = [str(o).strip() for o in raw if str(o).strip()]
+            answer = await adapter._ask(question, options=options or None, title="The agent is asking")
+            return {"content": [{"type": "text", "text": f"The user answered: {answer}"}]}
+
+        try:
+            return create_sdk_mcp_server(name="agentbridge", tools=[ask_user])
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("Couldn't register the ask_user tool: %s", exc)
+            return None
 
     def resume_handle(self) -> str | None:
         return self._session_id
@@ -454,13 +498,13 @@ class ClaudeCodeAdapter(AgentAdapter):
             return PermissionResultAllow(updated_input=tool_input)
         return PermissionResultDeny(message=f"User declined the {tool_name} action.", interrupt=False)
 
-    async def _ask(self, prompt: str, options: list[str] | None) -> str:
+    async def _ask(self, prompt: str, options: list[str] | None, title: str | None = None) -> str:
         """Surface a prompt to the frontend and block until :meth:`resolve_prompt` answers."""
         assert self._queue is not None, "_ask called outside of a turn"
         request_id = uuid.uuid4().hex[:12]
         future: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
-        await self._queue.put(AgentEvent.prompt(request_id, prompt, options=options))
+        await self._queue.put(AgentEvent.prompt(request_id, prompt, options=options, title=title))
         try:
             return await future
         finally:

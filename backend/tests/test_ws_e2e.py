@@ -77,7 +77,7 @@ class InteractiveFakeAdapter(AgentAdapter):
 
     async def send(self, text: str):
         self._future = asyncio.get_event_loop().create_future()
-        yield AgentEvent.prompt("req-1", "Allow edit to app.py?", options=["Allow", "Deny"])
+        yield AgentEvent.prompt("req-1", "Allow edit to app.py?", options=["Allow", "Deny"], title="The agent is asking")
         answer = await self._future
         if answer == "Allow":
             (self.workspace / "app.py").write_text("# edited\n")
@@ -266,6 +266,7 @@ def test_interactive_prompt_round_trip(client):
         ws.send_json({"type": "user_message", "chat_id": chat_id, "text": "edit app.py"})
         prompt = _recv_until(ws, "agent_prompt")
         assert prompt["options"] == ["Allow", "Deny"]
+        assert prompt["title"] == "The agent is asking"   # title flows through to the client
 
         # Reply while the agent turn is still blocked awaiting this answer.
         ws.send_json({"type": "agent_response", "chat_id": chat_id,

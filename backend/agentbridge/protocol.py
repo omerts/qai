@@ -289,6 +289,9 @@ class AgentPrompt(ServerMessage):
     # When present, the widget renders one button per option (e.g. ["Allow", "Deny"])
     # and sends the chosen label back as the answer. Absent => free-text reply.
     options: list[str] | None = None
+    # Card heading. Defaults in the widget to an approval/input label; the model's own questions
+    # (via the ask_user tool) set a question-style title instead.
+    title: str | None = None
 
 
 class BranchCreated(ServerMessage):

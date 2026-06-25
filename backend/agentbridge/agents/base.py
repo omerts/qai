@@ -66,6 +66,7 @@ class AgentEvent:
     request_id: str | None = None
     path: str | None = None
     options: list[str] | None = None
+    title: str | None = None
     meta: dict = field(default_factory=dict)
 
     @classmethod
@@ -73,8 +74,10 @@ class AgentEvent:
         return cls(kind="chunk", text=text, stream=stream)  # type: ignore[arg-type]
 
     @classmethod
-    def prompt(cls, request_id: str, text: str, options: list[str] | None = None) -> "AgentEvent":
-        return cls(kind="prompt", request_id=request_id, text=text, options=options)
+    def prompt(
+        cls, request_id: str, text: str, options: list[str] | None = None, title: str | None = None
+    ) -> "AgentEvent":
+        return cls(kind="prompt", request_id=request_id, text=text, options=options, title=title)
 
     @classmethod
     def file(cls, path: str) -> "AgentEvent":

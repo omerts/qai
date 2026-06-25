@@ -122,6 +122,7 @@ Each agent implements the `AgentAdapter` contract in [`backend/agentbridge/agent
 - **Interactive (Claude Code).** Runs in `default` permission mode: when it wants to edit/write/run a command, the widget shows an **Allow / Deny** card and the agent blocks until you answer.
 - **Auto-approve (default on).** A shield toggle lets routine actions run without prompting — but commands that look destructive (`rm -rf`, `sudo`, `git push --force`, `git reset --hard`, `curl … | sh`, recursive `chmod`/`chown`, disk writes, `shutdown`, …) still surface an Allow / Deny card. The preference is per-browser and only affects Claude Code (Cursor runs headless).
 - **Stop & queue.** Stop a running turn at any time, and queue follow-up messages while the agent is busy.
+- **The agent can ask you.** When Claude needs you to choose between options or clarify intent, it calls an `ask_user` tool that renders a card with **one button per answer** in the widget; your pick is fed back as the tool's result. (Claude Code's built-in `AskUserQuestion` can't render in headless/SDK mode, so it's disabled in favor of this.)
 
 ### Modes (Plan mode)
 
