@@ -161,23 +161,43 @@ class GitService:
         return self.worktree_base_dir() / f"{Path(self.repo.working_dir).name}__{slug}"
 
     def _registered_worktrees(self) -> set[str]:
+        # Compare by *resolved* path: `git worktree list` reports the canonical path (e.g.
+        # /private/var/... on macOS) which can differ from the path we build (/var/...).
         out = self.repo.git.worktree("list", "--porcelain")
         paths: set[str] = set()
         for line in out.splitlines():
             if line.startswith("worktree "):
-                paths.add(str(Path(line[len("worktree ") :].strip())))
+                p = Path(line[len("worktree ") :].strip())
+                try:
+                    paths.add(str(p.resolve()))
+                except OSError:
+                    paths.add(str(p))
         return paths
 
-    def ensure_worktree(self, branch: str, base: str | None = None) -> Path:
-        """Return a worktree dir checked out to ``branch``, creating it if needed.
+    def _is_registered(self, path: Path) -> bool:
+        try:
+            resolved = str(path.resolve())
+        except OSError:
+            resolved = str(path)
+        return resolved in self._registered_worktrees() or str(path) in self._registered_worktrees()
 
-        The workspace's own HEAD is never switched — the branch is only ever checked out in
-        this dedicated worktree, so the workspace (and the dev server running against it)
-        keeps its current branch. Reuses an existing worktree for the branch if present.
+    def ensure_worktree(self, branch: str, base: str | None = None) -> Path:
+        """Return a worktree dir checked out to ``branch``, creating it if needed (and reusing it
+        across restarts). The workspace's own HEAD is never switched — the branch lives only in this
+        dedicated worktree, so the workspace (and its dev server) keeps its current branch.
         """
         path = self.worktree_dir_for(branch)
-        if path.exists() and str(path) in self._registered_worktrees():
+        if path.exists() and self._is_registered(path):
             return path
+        # A leftover dir git no longer tracks (e.g. metadata pruned): clear stale entries, then
+        # reuse if it's now recognized.
+        if path.exists():
+            try:
+                self.repo.git.worktree("prune")
+            except GitCommandError:
+                pass
+            if self._is_registered(path):
+                return path
         path.parent.mkdir(parents=True, exist_ok=True)
         heads = {h.name for h in self.repo.heads}
         base_ref = base or self.current_branch()
@@ -187,6 +207,10 @@ class GitService:
             else:
                 self.repo.git.worktree("add", "-b", branch, str(path), base_ref)
         except GitCommandError as exc:
+            # The dir already exists and looks like a worktree — reuse it rather than failing the
+            # reopen (this is the common "restart finds my chat's worktree" case).
+            if path.exists() and (path / ".git").exists():
+                return path
             raise GitError(f"Could not create worktree for '{branch}': {exc}") from exc
         return path
 

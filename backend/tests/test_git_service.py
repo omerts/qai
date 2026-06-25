@@ -167,6 +167,9 @@ def test_ensure_worktree_leaves_workspace_branch(repo: Path, monkeypatch):
     assert GitService(path).current_branch() == "agentbridge/feature"
     # Idempotent: asking again returns the same worktree.
     assert svc.ensure_worktree("agentbridge/feature") == path
+    # And reusable from a *fresh* GitService (simulates reopening the chat after a refresh) — must
+    # not fail trying to re-create the existing worktree (regression: path-resolve mismatch).
+    assert GitService(repo).ensure_worktree("agentbridge/feature") == path
 
 
 def test_migrate_uncommitted_to_relocates_changes(repo: Path, monkeypatch):

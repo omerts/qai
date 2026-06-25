@@ -577,6 +577,8 @@ class Session:
                 or "AgentBridge changes"
             )
         title = re.sub(r"\s+", " ", title).strip().strip('"').rstrip(".:")[:72] or "AgentBridge changes"
+        if title and title[0].islower():   # PR titles read better capitalized
+            title = title[0].upper() + title[1:]
         body = (user_body or "").strip() or self._build_pr_body((gen_summary or summary), touched)
         return title, body
 
