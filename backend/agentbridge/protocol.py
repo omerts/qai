@@ -43,6 +43,8 @@ class AgentInfo(BaseModel):
     theme: dict[str, str] = Field(default_factory=dict)
     #: Models the user can pick for this agent (empty => no model picker shown).
     models: list[ModelOption] = Field(default_factory=list)
+    #: Reasoning-effort levels the user can pick (empty => no effort picker shown).
+    efforts: list[ModelOption] = Field(default_factory=list)
 
 
 class FileChange(BaseModel):
@@ -120,6 +122,8 @@ class UserMessage(BaseModel):
     mode: str | None = None
     # Model to use for this turn (an id from the agent's advertised models; empty/None = default).
     model: str | None = None
+    # Reasoning effort for this turn (an id from the agent's advertised efforts; empty/None = default).
+    effort: str | None = None
     # Workspace-relative paths of files the user attached to this turn (previously uploaded via
     # ``upload_file``). The server points the agent at them in the preamble.
     attachments: list[str] = Field(default_factory=list)

@@ -146,7 +146,7 @@
   color: var(--ab-fg);
   cursor: pointer;
 }
-.ab-mode[hidden], .ab-model[hidden] { display: none; }
+.ab-mode[hidden], .ab-model[hidden], .ab-effort[hidden] { display: none; }
 .ab-btn.primary { background: var(--ab-accent); color: var(--ab-accent-fg); border-color: var(--ab-accent); }
 .ab-btn:disabled { opacity: .5; cursor: not-allowed; }
 .ab-branch-label { font-size: 11px; color: var(--ab-muted); margin-left: auto; font-family: var(--ab-mono); }

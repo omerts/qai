@@ -74,6 +74,9 @@ _ALLOW_ANSWERS = {"allow", "yes", "y", "approve", "ok", ""}
 # SDK permission modes we accept from the widget (see ClaudeAgentOptions.permission_mode).
 _VALID_MODES = {"default", "plan", "acceptEdits", "dontAsk", "bypassPermissions"}
 
+# Reasoning-effort levels we accept (see ClaudeAgentOptions.effort).
+_VALID_EFFORTS = {"low", "medium", "high", "max"}
+
 # File-mutating tools — a tool_use of one of these means a file was touched.
 _EDIT_TOOLS = {"edit", "write", "create", "multiedit", "str_replace", "notebookedit"}
 
@@ -201,6 +204,8 @@ class ClaudeCodeAdapter(AgentAdapter):
         self._applied_mode: str | None = None  # last mode pushed to the live client
         self._model_id: str | None = None  # selected model alias/id for the next turn (None=default)
         self._applied_model: str | None = None  # last model pushed to the live client
+        self._effort: str | None = None    # selected reasoning effort for the next turn (None=default)
+        self._applied_effort: str | None = None  # effort the live client was built with
 
     @classmethod
     def is_available(cls) -> bool:
@@ -216,6 +221,15 @@ class ClaudeCodeAdapter(AgentAdapter):
             {"id": "opus", "label": "Opus"},
             {"id": "sonnet", "label": "Sonnet"},
             {"id": "haiku", "label": "Haiku"},
+        ]
+
+    def efforts(self) -> list[dict[str, str]]:
+        return [
+            {"id": "", "label": "Default"},
+            {"id": "low", "label": "Low"},
+            {"id": "medium", "label": "Medium"},
+            {"id": "high", "label": "High"},
+            {"id": "max", "label": "Max"},
         ]
 
     async def start(self, ctx: SessionContext) -> None:
@@ -238,7 +252,7 @@ class ClaudeCodeAdapter(AgentAdapter):
 
         from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient  # type: ignore
 
-        options = ClaudeAgentOptions(
+        opt_kwargs = dict(
             cwd=str(self.workspace),
             permission_mode="default",  # 'default' => edits/bash route through can_use_tool
             can_use_tool=self._can_use_tool,
@@ -254,6 +268,15 @@ class ClaudeCodeAdapter(AgentAdapter):
             # would block every Bash command (see _sandbox_enabled).
             sandbox={"enabled": _sandbox_enabled()},
         )
+        if self._effort:
+            opt_kwargs["effort"] = self._effort
+        try:
+            options = ClaudeAgentOptions(**opt_kwargs)
+        except TypeError:
+            # Older SDK without the `effort` option — drop it rather than failing the session.
+            opt_kwargs.pop("effort", None)
+            _log.warning("Installed claude-agent-sdk doesn't support 'effort'; ignoring the selection.")
+            options = ClaudeAgentOptions(**opt_kwargs)
         # Make MCP wiring diagnosable: log which plugins we hand the SDK (names + transport only,
         # never the args/headers/env that may carry tokens).
         if self._mcp_servers:
@@ -277,6 +300,42 @@ class ClaudeCodeAdapter(AgentAdapter):
 
     def set_model(self, model: str | None) -> None:
         self._model_id = (model or "").strip() or None
+
+    def set_effort(self, effort: str | None) -> None:
+        e = (effort or "").strip().lower()
+        self._effort = e if e in _VALID_EFFORTS else None
+
+    async def _apply_effort(self) -> None:
+        """Apply the selected reasoning effort. Effort is a client-construction option with no
+        runtime setter, so on a change we rebuild the client (resuming the conversation). A live
+        runtime setter is used instead if a future SDK provides one. Never breaks the turn — on
+        failure the current session is kept."""
+        if self._client is None or self._effort == self._applied_effort:
+            return
+        setter = getattr(self._client, "set_effort", None)
+        if callable(setter):
+            try:
+                await setter(self._effort or None)
+                self._applied_effort = self._effort
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("Failed to set effort '%s': %s", self._effort, exc)
+            return
+        # Rebuild the client with the new effort, resuming where we left off.
+        self._resume = self._session_id or self._resume
+        try:
+            new_client = self._make_client()
+            await new_client.connect()
+        except Exception as exc:  # noqa: BLE001 — keep the current session on failure
+            _log.warning("Couldn't apply effort '%s' (kept current session): %s", self._effort, exc)
+            return
+        old, self._client = self._client, new_client
+        self._applied_effort = self._effort
+        self._applied_mode = None   # re-apply mode/model to the freshly built client
+        self._applied_model = None
+        try:
+            await old.disconnect()
+        except Exception:  # noqa: BLE001
+            pass
 
     async def _apply_model(self) -> None:
         """Push the selected model to the live client before a turn (runtime switch); only on change."""
@@ -432,8 +491,9 @@ class ClaudeCodeAdapter(AgentAdapter):
             yield AgentEvent.error("Claude Code session is not started.")
             return
 
-        await self._apply_mode()   # honor the selected mode (e.g. plan) for this turn
-        await self._apply_model()  # honor the selected model for this turn
+        await self._apply_effort()  # may rebuild the client; do this before mode/model re-apply
+        await self._apply_mode()    # honor the selected mode (e.g. plan) for this turn
+        await self._apply_model()   # honor the selected model for this turn
 
         queue: asyncio.Queue[AgentEvent] = asyncio.Queue()
         self._queue = queue

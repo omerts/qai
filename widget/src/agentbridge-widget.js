@@ -59,6 +59,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   var LS_AUTO = "agentbridge:autoApprove";
   var LS_MODE = "agentbridge:mode";   // working mode: "default" | "plan"
   var LS_MODEL = "agentbridge:model"; // selected model id (agent-specific; "" = default)
+  var LS_EFFORT = "agentbridge:effort"; // selected reasoning-effort id ("" = default)
   var LS_POS = "agentbridge:pos";   // dragged {left, top} of the widget
 
   function lsGet(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } }
@@ -119,6 +120,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.autoApprove = lsGet(LS_AUTO) !== "0";  // default ON; "0" = user turned it off
     this.mode = lsGet(LS_MODE) || "default";    // "default" (code) | "plan"
     this.modelId = lsGet(LS_MODEL) || "";       // selected model id ("" = agent default)
+    this.effortId = lsGet(LS_EFFORT) || "";     // selected reasoning effort ("" = agent default)
     this._autoOpened = false;
     this._init();
   }
@@ -193,6 +195,9 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     // Model (options come from the active agent; shown only when it advertises models).
     this.modelSelect = h("select", { class: "ab-select ab-model", title: "Model" });
     this.modelSelect.addEventListener("change", function () { self._selectModel(); });
+    // Reasoning effort (options come from the active agent; shown only when it advertises them).
+    this.effortSelect = h("select", { class: "ab-select ab-effort", title: "Reasoning effort" });
+    this.effortSelect.addEventListener("change", function () { self._selectEffort(); });
     // Working mode (shown only for agents that support it, e.g. Claude's plan mode).
     this.modeSelect = h("select", { class: "ab-select ab-mode", title: "Working mode" });
     this.modeSelect.appendChild(h("option", { value: "default", text: "Code" }));
@@ -216,7 +221,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.pluginsBtn.addEventListener("click", function () { self._togglePlugins(); });
     this.branchLabel = h("span", { class: "ab-branch-label" });
     var controls = h("div", { class: "ab-controls" }, [
-      this.agentSelect, this.modelSelect, this.modeSelect, this.prBtn, this.inspectBtn, this.autoBtn, this.pluginsBtn, this.branchLabel,
+      this.agentSelect, this.modelSelect, this.effortSelect, this.modeSelect, this.prBtn, this.inspectBtn, this.autoBtn, this.pluginsBtn, this.branchLabel,
     ]);
     this._refreshAutoApproveBtn();
 
@@ -848,10 +853,13 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     if (this.mode && this.mode !== "default" && this._activeAgentCaps().plan_mode) {
       payload.mode = this.mode;
     }
-    // Send a non-default model only when the active agent advertises models.
+    // Send a non-default model/effort only when the active agent advertises them.
     var agent = this._activeAgent();
     if (this.modelId && agent && (agent.models || []).length) {
       payload.model = this.modelId;
+    }
+    if (this.effortId && agent && (agent.efforts || []).length) {
+      payload.effort = this.effortId;
     }
     if (attachments && attachments.length) payload.attachments = attachments;
     this._send(payload);
@@ -1443,6 +1451,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     }
     this._updateModeVisibility();
     this._updateModelOptions();
+    this._updateEffortOptions();
   };
 
   // The agent record currently in effect, or null.
@@ -1466,23 +1475,33 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.modeSelect.hidden = !this._activeAgentCaps().plan_mode;
   };
 
-  // Populate the model picker from the active agent's advertised models; hide it if none.
+  // Fill a <select> from agent-advertised options [{id,label}]; hide it if none. Returns the
+  // resolved current id — kept if the agent still offers it, else the first (default).
+  AgentBridgeWidget.prototype._fillAgentSelect = function (select, options, current) {
+    options = options || [];
+    select.hidden = !options.length;
+    if (!options.length) return current;
+    select.innerHTML = "";
+    var ids = [];
+    options.forEach(function (o) {
+      ids.push(o.id);
+      select.appendChild(h("option", { value: o.id, text: o.label }));
+    });
+    if (ids.indexOf(current) === -1) current = ids[0] || "";
+    select.value = current;
+    return current;
+  };
+
   AgentBridgeWidget.prototype._updateModelOptions = function () {
     if (!this.modelSelect) return;
     var a = this._activeAgent();
-    var models = (a && a.models) || [];
-    this.modelSelect.hidden = !models.length;
-    if (!models.length) return;
-    this.modelSelect.innerHTML = "";
-    var ids = [];
-    var self = this;
-    models.forEach(function (m) {
-      ids.push(m.id);
-      self.modelSelect.appendChild(h("option", { value: m.id, text: m.label }));
-    });
-    // Keep the saved choice if this agent still offers it; otherwise fall back to its default.
-    if (ids.indexOf(this.modelId) === -1) this.modelId = ids[0] || "";
-    this.modelSelect.value = this.modelId;
+    this.modelId = this._fillAgentSelect(this.modelSelect, a && a.models, this.modelId);
+  };
+
+  AgentBridgeWidget.prototype._updateEffortOptions = function () {
+    if (!this.effortSelect) return;
+    var a = this._activeAgent();
+    this.effortId = this._fillAgentSelect(this.effortSelect, a && a.efforts, this.effortId);
   };
 
   AgentBridgeWidget.prototype._selectModel = function () {
@@ -1490,6 +1509,13 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     lsSet(LS_MODEL, this.modelId);
     var label = this.modelSelect.options[this.modelSelect.selectedIndex];
     this._system("Model set to " + ((label && label.text) || "default") + " for new messages.");
+  };
+
+  AgentBridgeWidget.prototype._selectEffort = function () {
+    this.effortId = this.effortSelect.value || "";
+    lsSet(LS_EFFORT, this.effortId);
+    var label = this.effortSelect.options[this.effortSelect.selectedIndex];
+    this._system("Reasoning effort set to " + ((label && label.text) || "default") + " for new messages.");
   };
 
   AgentBridgeWidget.prototype._selectMode = function () {

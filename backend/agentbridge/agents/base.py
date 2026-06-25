@@ -118,6 +118,11 @@ class AgentAdapter(ABC):
         default). Empty (the default) => the widget shows no model picker."""
         return []
 
+    def efforts(self) -> list[dict[str, str]]:
+        """Selectable reasoning-effort levels as ``[{"id", "label"}]`` (id ``""`` = default).
+        Empty (the default) => the widget shows no effort picker."""
+        return []
+
     @abstractmethod
     async def start(self, ctx: SessionContext) -> None:
         """Prepare the agent for a session (spawn process / open SDK client)."""
@@ -168,6 +173,11 @@ class AgentAdapter(ABC):
     def set_model(self, model: str | None) -> None:
         """Choose the model for upcoming turns (an id from :meth:`models`, or ``None``/empty for
         the agent's default). Only meaningful for adapters that advertise models; default no-op."""
+        return None
+
+    def set_effort(self, effort: str | None) -> None:
+        """Choose the reasoning effort for upcoming turns (an id from :meth:`efforts`, or
+        ``None``/empty for the default). Only meaningful for adapters that advertise efforts."""
         return None
 
     async def interrupt(self) -> bool:

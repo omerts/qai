@@ -47,8 +47,9 @@ def list_agent_info() -> list[AgentInfo]:
             inst = cls(Path("."))
             caps = inst.capabilities().as_dict()
             models = inst.models()
+            efforts = inst.efforts()
         except Exception:  # noqa: BLE001 — never let one adapter break the list
-            caps, models = {}, []
+            caps, models, efforts = {}, [], []
         infos.append(
             AgentInfo(
                 name=name,
@@ -57,6 +58,7 @@ def list_agent_info() -> list[AgentInfo]:
                 capabilities=caps,
                 theme=dict(cls.theme),
                 models=models,
+                efforts=efforts,
             )
         )
     return infos

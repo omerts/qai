@@ -134,6 +134,8 @@ For agents that support it (Claude Code), a **mode picker** in the controls row 
 
 A **model picker** (next to the agent dropdown) lets you choose the model per message — for Claude Code: **Default / Opus / Sonnet / Haiku** (aliases, so they track the latest of each tier). It's applied at runtime via the SDK's `set_model`, so you can switch between turns (e.g. plan with Opus, iterate with Sonnet). The options are advertised by each agent, and the picker is hidden for agents that don't expose models.
 
+An **effort picker** sits beside it for **reasoning effort** — **Default / Low / Medium / High / Max** — trading latency and token spend for depth of reasoning (the SDK's `effort` option). Effort is a session-construction setting, so changing it mid-chat transparently rebuilds the agent session (resuming where you left off); a fresh selection applies immediately. Like the model picker, it's agent-advertised and hidden when unsupported.
+
 ### Workspace settings
 
 Agents run _in your workspace_ and honor its own configuration:

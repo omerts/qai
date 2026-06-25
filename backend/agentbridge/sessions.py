@@ -213,6 +213,7 @@ class Session:
         self.adapter.set_auto_approve(msg.auto_approve)  # type: ignore[union-attr]
         self.adapter.set_mode(msg.mode)  # type: ignore[union-attr]
         self.adapter.set_model(msg.model)  # type: ignore[union-attr]
+        self.adapter.set_effort(msg.effort)  # type: ignore[union-attr]
 
         text = msg.text
         sections = []

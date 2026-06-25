@@ -73,6 +73,21 @@ def test_claude_advertises_models(tmp_path: Path):
     assert ids[0] == "" and {"opus", "sonnet", "haiku"} <= set(ids)
 
 
+def test_set_effort_normalizes(tmp_path: Path):
+    a = ClaudeCodeAdapter(tmp_path)
+    assert a._effort is None
+    a.set_effort("high"); assert a._effort == "high"
+    a.set_effort("HIGH"); assert a._effort == "high"
+    a.set_effort(""); assert a._effort is None        # "Default" choice
+    a.set_effort("bogus"); assert a._effort is None    # unknown -> default
+    a.set_effort("max"); assert a._effort == "max"
+
+
+def test_claude_advertises_efforts(tmp_path: Path):
+    ids = [e["id"] for e in ClaudeCodeAdapter(tmp_path).efforts()]
+    assert ids[0] == "" and {"low", "medium", "high", "max"} <= set(ids)
+
+
 def _make_session(tmp_path: Path, send, agent: str = "fake") -> Session:
     store = ChatStore(tmp_path)
     record = store.create(agent=agent, title="t")
