@@ -357,6 +357,9 @@
 .ab-card code { font-family: var(--ab-mono); background: var(--ab-tint); padding: 1px 5px; border-radius: 4px; }
 .ab-card .ab-card-actions { display: flex; gap: 8px; margin-top: 8px; }
 .ab-prompt-input { width: 100%; margin-top: 8px; }
+/* Multi-select question rows */
+.ab-check-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; font-size: 13px; }
+.ab-check { width: 15px; height: 15px; cursor: pointer; accent-color: var(--ab-accent); }
 
 /* Changed files — collapsible; hidden by default, the header toggles the list */
 .ab-files {

@@ -1314,6 +1314,24 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       card.remove();
     }
 
+    if (msg.options && msg.options.length && msg.multi) {
+      // Multi-select: a checkbox per option + a Submit button; answer is the picks, comma-joined.
+      var rows = msg.options.map(function (opt) {
+        var cb = h("input", { type: "checkbox", class: "ab-check" });
+        return { opt: opt, cb: cb, row: h("label", { class: "ab-check-row" }, [cb, h("span", { text: opt })]) };
+      });
+      var submit = h("button", { class: "ab-btn primary", text: "Submit" });
+      submit.addEventListener("click", function () {
+        var picked = rows.filter(function (r) { return r.cb.checked; }).map(function (r) { return r.opt; });
+        reply(picked.length ? picked.join(", ") : "(none selected)");
+      });
+      // Assign the shared `card` (the reply() closure removes it on submit).
+      card = this._card(msg.title || "Agent needs your input", msg.prompt, [submit]);
+      var mactions = card.querySelector(".ab-card-actions");
+      rows.forEach(function (r) { card.insertBefore(r.row, mactions); });
+      return;
+    }
+
     if (msg.options && msg.options.length) {
       var buttons = msg.options.map(function (opt, i) {
         var b = h("button", { class: "ab-btn" + (i === 0 ? " primary" : ""), text: opt });

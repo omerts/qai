@@ -422,7 +422,7 @@ class Session:
             await self.send(
                 P.AgentPrompt(
                     chat_id=self.chat_id, request_id=event.request_id, prompt=event.text,
-                    options=event.options, title=event.title,
+                    options=event.options, title=event.title, multi=event.multi,
                 )
             )
         elif event.kind == "error":

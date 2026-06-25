@@ -289,6 +289,18 @@ async function main() {
   optBtns[1].click();   // pick "Vue"
   const ans = sent.find((m) => m.type === "agent_response");
   assert.ok(ans && ans.request_id === "q1" && ans.answer === "Vue", "selected answer not sent");
+
+  // Multi-select: checkboxes + Submit; the answer is the picks joined.
+  sent.length = 0;
+  widget._onPrompt({ chat_id: "c1", request_id: "q2", title: "The agent is asking", multi: true,
+    prompt: "Which features?", options: ["Dark mode", "Search", "Export"] });
+  const mCard = widget.shadow.querySelector(".ab-card");
+  const checks = mCard.querySelectorAll(".ab-check");
+  assert.equal(checks.length, 3, "one checkbox per option in multi-select");
+  checks[0].checked = true; checks[2].checked = true;   // Dark mode + Export
+  mCard.querySelector(".ab-card-actions .ab-btn").click();   // Submit
+  const mans = sent.find((m) => m.type === "agent_response" && m.request_id === "q2");
+  assert.ok(mans && mans.answer === "Dark mode, Export", "multi-select answer not joined: " + (mans && mans.answer));
   widget.activeChatId = null;
 
   // --- Plugins (MCP): open the panel, list servers, add via the form, toggle, delete ---

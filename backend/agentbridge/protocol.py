@@ -292,6 +292,9 @@ class AgentPrompt(ServerMessage):
     # Card heading. Defaults in the widget to an approval/input label; the model's own questions
     # (via the ask_user tool) set a question-style title instead.
     title: str | None = None
+    # When True (with options), the widget lets the user pick multiple answers (checkboxes + submit)
+    # instead of a single click.
+    multi: bool = False
 
 
 class BranchCreated(ServerMessage):

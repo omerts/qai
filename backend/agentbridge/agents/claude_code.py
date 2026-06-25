@@ -313,15 +313,19 @@ class ClaudeCodeAdapter(AgentAdapter):
         @tool(
             "ask_user",
             "Ask the user a question and get their chosen answer. Use this whenever you need the "
-            "user to decide between options or clarify intent, instead of only asking in plain text.",
-            {"question": str, "options": list},
+            "user to decide between options or clarify intent, instead of only asking in plain "
+            "text. Set multiple=true to let them pick more than one option.",
+            {"question": str, "options": list, "multiple": bool},
         )
         async def ask_user(args):  # noqa: ANN001
             data = args or {}
             question = str(data.get("question") or "").strip() or "The agent has a question."
             raw = data.get("options") or []
             options = [str(o).strip() for o in raw if str(o).strip()]
-            answer = await adapter._ask(question, options=options or None, title="The agent is asking")
+            multi = bool(data.get("multiple"))
+            answer = await adapter._ask(
+                question, options=options or None, title="The agent is asking", multi=multi
+            )
             return {"content": [{"type": "text", "text": f"The user answered: {answer}"}]}
 
         try:
@@ -498,13 +502,15 @@ class ClaudeCodeAdapter(AgentAdapter):
             return PermissionResultAllow(updated_input=tool_input)
         return PermissionResultDeny(message=f"User declined the {tool_name} action.", interrupt=False)
 
-    async def _ask(self, prompt: str, options: list[str] | None, title: str | None = None) -> str:
+    async def _ask(
+        self, prompt: str, options: list[str] | None, title: str | None = None, multi: bool = False
+    ) -> str:
         """Surface a prompt to the frontend and block until :meth:`resolve_prompt` answers."""
         assert self._queue is not None, "_ask called outside of a turn"
         request_id = uuid.uuid4().hex[:12]
         future: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
-        await self._queue.put(AgentEvent.prompt(request_id, prompt, options=options, title=title))
+        await self._queue.put(AgentEvent.prompt(request_id, prompt, options=options, title=title, multi=multi))
         try:
             return await future
         finally:
