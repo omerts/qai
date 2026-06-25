@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -100,6 +101,8 @@ class GitService:
             raise GitError(f"{workspace} is not inside a git repository") from exc
         # The actual repo root may be a parent of `workspace` — mark it too.
         _ensure_git_safe_directory(Path(self.repo.working_dir))
+        #: Repo root — the base for the workspace-relative paths these methods operate on.
+        self.workspace = Path(self.repo.working_dir)
 
     # --------------------------------------------------------------------- #
     # Branch / status
@@ -416,6 +419,69 @@ class GitService:
         except GitCommandError as exc:
             raise GitError(f"Staging changes into the worktree failed: {exc}") from exc
         return True
+
+    def copy_paths_to(self, worktree_path: Path, paths: list[str]) -> bool:
+        """Copy the workspace's current working-tree state of ``paths`` into ``worktree_path``
+        **without modifying the workspace**. Modified/new files are copied over; files the agent
+        deleted are removed in the worktree. Returns True if anything was copied or removed.
+
+        This builds a PR commit non-destructively: the agent's edits stay live in the workspace
+        (so the dev server keeps showing them) until the PR is confirmed created — see
+        :meth:`discard_paths`, which is only called on success.
+        """
+        changed = False
+        for rel in paths:
+            src = self.workspace / rel
+            dst = Path(worktree_path) / rel
+            if src.is_file():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+                changed = True
+            elif not src.exists() and dst.exists():
+                # The agent deleted this file — mirror the deletion onto the branch.
+                try:
+                    dst.unlink()
+                    changed = True
+                except OSError:
+                    pass
+        return changed
+
+    def discard_paths(self, paths: list[str]) -> None:
+        """Reset the given workspace paths back to HEAD — used only *after* a PR is created, since
+        those edits now live on the branch. Tracked changes are reverted; untracked new files are
+        removed. Strictly scoped to ``paths``; never a blanket clean. Never raises."""
+        for rel in paths:
+            try:
+                st = self.repo.git.status("--porcelain", "--", rel).strip()
+            except GitCommandError:
+                continue
+            if not st:
+                continue
+            if st[:2].strip() == "??":  # untracked new file -> remove it
+                fp = self.workspace / rel
+                try:
+                    if fp.is_file():
+                        fp.unlink()
+                except OSError:
+                    pass
+            else:  # tracked modification/deletion -> restore the committed version
+                try:
+                    self.repo.git.checkout("HEAD", "--", rel)
+                except GitCommandError:
+                    pass
+
+    def discard_worktree(self, worktree_path: Path, branch: str | None = None) -> None:
+        """Best-effort teardown of a worktree (and its local branch) after a *failed* PR attempt,
+        so a retry starts from a clean base. Never raises."""
+        try:
+            self.repo.git.worktree("remove", "--force", str(worktree_path))
+        except GitCommandError:
+            pass
+        if branch:
+            try:
+                self.repo.git.branch("-D", branch)
+            except GitCommandError:
+                pass
 
     def status(self) -> list[FileChange]:
         """Working-tree changes as porcelain entries (staged + unstaged + untracked)."""

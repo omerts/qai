@@ -346,8 +346,15 @@ class Session:
             # HTTP call — so run it off the event loop; otherwise it would stall every other
             # WebSocket connection (and turn) for the duration of the push/PR round-trip.
             path, pr = await asyncio.to_thread(self._open_pr_blocking, branch, title, body, touched)
-        except GitError as exc:
-            await self.send(P.ErrorMessage(message=str(exc), chat_id=self.chat_id))
+        except Exception as exc:  # noqa: BLE001 — surface any failure, but never lose the user's work
+            # The workspace was never modified (changes are only reset after the PR is live), so the
+            # agent's edits are still safe — make that explicit and let the user just retry.
+            reason = str(exc) or exc.__class__.__name__
+            await self.send(P.ErrorMessage(
+                message=(f"Couldn't create the PR: {reason}\n"
+                         "Your changes are safe in the workspace — fix the issue and click Create PR again."),
+                chat_id=self.chat_id,
+            ))
             return
 
         self.record.touched = []  # committed — start fresh for any further edits in this chat
@@ -364,15 +371,29 @@ class Session:
     def _open_pr_blocking(
         self, branch: str, title: str, body: str, touched: list[str]
     ) -> tuple[Path, PullRequest]:
-        """Create the branch worktree, move the agent's files onto it, commit, push, and open the
-        PR. Pure blocking work (git subprocesses + a synchronous GitHub call), so it runs in a
-        worker thread via ``asyncio.to_thread`` rather than on the event loop."""
+        """Create the PR transactionally so a failure never loses the user's work.
+
+        The agent's files are *copied* onto the branch worktree (the workspace is left untouched),
+        then committed, pushed, and turned into a PR. Only once the PR is live do we reset those
+        files in the workspace. If anything fails, the half-built worktree/branch is torn down and
+        the workspace still has every change — the user can simply retry. Pure blocking work, so it
+        runs in a worker thread via ``asyncio.to_thread``.
+        """
         path = self.git.ensure_worktree(branch)
-        self.git.migrate_uncommitted_to(path, paths=touched)
-        wt_git = GitService(path)
-        wt_git.commit_all(title)
-        wt_git.push(branch, token=self.github_token)
-        pr = wt_git.create_pull_request(title=title, head=branch, body=body, token=self.github_token)
+        try:
+            self.git.copy_paths_to(path, touched)
+            wt_git = GitService(path)
+            if wt_git.commit_all(title) is None:
+                raise GitError("Nothing to commit for the agent's changes.")
+            wt_git.push(branch, token=self.github_token)
+            pr = wt_git.create_pull_request(title=title, head=branch, body=body, token=self.github_token)
+        except Exception:
+            # Workspace was never touched; just remove the half-built branch so a retry is clean.
+            self.git.discard_worktree(path, branch)
+            raise
+        # PR is live — now (and only now) reset the workspace for those files, since they're on the
+        # branch. A failure here is harmless (the PR already exists); keep it out of the try above.
+        self.git.discard_paths(touched)
         return path, pr
 
     # ------------------------------------------------------------------ #

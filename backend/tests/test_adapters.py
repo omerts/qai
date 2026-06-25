@@ -239,3 +239,51 @@ async def test_session_create_pr_resets_workspace(tmp_path: Path, monkeypatch):
     assert not (tmp_path / "agent_made_this.txt").exists()
     assert session.git.current_branch() == "main"
     assert not session.git.has_uncommitted_changes()
+
+
+async def test_session_pr_failure_preserves_changes_then_retry_succeeds(tmp_path: Path, monkeypatch):
+    """The reported bug: a failed PR must NOT lose the agent's work. The workspace is left intact
+    and a retry succeeds."""
+    monkeypatch.setenv("AGENTBRIDGE_WORKTREE_DIR", str(tmp_path.parent / "wt"))
+    monkeypatch.setenv("AGENTBRIDGE_STATE_DIR", str(tmp_path.parent / "state"))
+    _init_repo(tmp_path)
+    from agentbridge import git_service
+
+    # Push fails the first time (e.g. auth/network), succeeds the second.
+    calls = {"push": 0}
+
+    def flaky_push(self, *a, **k):
+        calls["push"] += 1
+        if calls["push"] == 1:
+            raise git_service.GitError("push rejected")
+
+    monkeypatch.setattr(git_service.GitService, "push", flaky_push)
+    monkeypatch.setattr(
+        git_service.GitService, "create_pull_request",
+        lambda self, **k: git_service.PullRequest(url="https://example/pull/1", number=1),
+    )
+
+    sent: list[P.ServerMessage] = []
+
+    async def send(m: P.ServerMessage) -> None:
+        sent.append(m)
+
+    session = _make_session(tmp_path, send)
+    session.adapter = FakeAdapter(tmp_path)
+    await session.handle(P.UserMessage(type="user_message", chat_id=session.chat_id, text="make a file"))
+    assert (tmp_path / "agent_made_this.txt").exists()
+
+    # Attempt #1 fails — the change MUST still be in the workspace, and still tracked for retry.
+    await session.handle(P.CreatePR(type="create_pr", chat_id=session.chat_id, title="Add a file"))
+    assert "pr_created" not in [m.type for m in sent]
+    assert any(m.type == "error" for m in sent)
+    assert (tmp_path / "agent_made_this.txt").exists(), "a failed PR must not lose the agent's work"
+    assert session.git.is_path_dirty("agent_made_this.txt")
+    assert "agent_made_this.txt" in session.record.touched
+
+    # Attempt #2 succeeds — now the workspace is reset and the PR is created.
+    sent.clear()
+    await session.handle(P.CreatePR(type="create_pr", chat_id=session.chat_id, title="Add a file"))
+    assert "pr_created" in [m.type for m in sent]
+    assert not (tmp_path / "agent_made_this.txt").exists()
+    assert not session.git.has_uncommitted_changes()
