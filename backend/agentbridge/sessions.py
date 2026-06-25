@@ -13,8 +13,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import logging
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -24,6 +26,8 @@ from .agents.registry import create_adapter, get_adapter_class, list_agent_info
 from .git_service import GitError, GitService, PullRequest
 from .mcp_config import McpServer, McpStore
 from .store import ChatRecord, ChatStore
+
+_log = logging.getLogger("agentbridge")
 
 Send = Callable[[P.ServerMessage], Awaitable[None]]
 
@@ -176,8 +180,22 @@ class Session:
         self.record.worktree_branch = branch
         if not self.record.target_branch:
             self.record.target_branch = branch
+        self._copy_workspace_skills(path)
         self._worktree_ready = True
         self.store.save(self.record)
+
+    def _copy_workspace_skills(self, worktree: Path) -> None:
+        """Give the agent the workspace's Agent Skills (.claude/skills/) even when they aren't
+        committed — the worktree is a checkout that would otherwise only have committed ones.
+        These copies are kept out of the live overlay and out of PRs (see changed_paths /
+        _commit_pr_blocking)."""
+        src = self.workspace / ".claude" / "skills"
+        if not src.is_dir():
+            return
+        try:
+            shutil.copytree(src, worktree / ".claude" / "skills", dirs_exist_ok=True)
+        except OSError as exc:
+            _log.warning("Couldn't copy workspace skills into the worktree: %s", exc)
 
     def cleanup_worktree(self) -> None:
         """Remove this chat's worktree and branch (on delete). Blocking; via asyncio.to_thread."""
@@ -197,7 +215,9 @@ class Session:
             paths.update(line.strip() for line in out.splitlines() if line.strip())
         except Exception:  # noqa: BLE001
             pass
-        return sorted(paths)
+        # Never mirror agent config (.claude — incl. the skills we copy in) into the workspace; it
+        # isn't the agent's work and reverting it could delete the user's own .claude files.
+        return sorted(p for p in paths if not p.startswith(".claude/"))
 
     async def _ensure_adapter(self) -> None:
         if self.adapter is not None:
@@ -458,7 +478,8 @@ class Session:
     def _commit_pr_blocking(self, branch: str, title: str, body: str) -> PullRequest:
         """Commit the worktree's changes (no-op if a prior attempt already committed), push the
         chat's branch, and open the PR. Blocking; runs via asyncio.to_thread."""
-        self.git.commit_all(title)  # commits if dirty; None if already clean/committed
+        # Commit the agent's work, but never the .claude config we copy in (skills) or scratch.
+        self.git.commit_all(title, exclude=[".claude", ".agentbridge"])
         if not self._has_commits_ahead():
             raise GitError("Nothing to commit for the agent's changes.")
         self.git.push(branch, token=self.github_token)

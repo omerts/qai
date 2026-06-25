@@ -307,6 +307,44 @@ def test_pr_meta_drops_agent_filler(tmp_path: Path, monkeypatch):
     assert body3 == "My own body.\n\nTicket: ABC-123"
 
 
+async def test_workspace_skills_reach_worktree_but_not_the_pr(tmp_path: Path, monkeypatch):
+    """An uncommitted Agent Skill in the workspace is made available in the chat's worktree (so the
+    agent can use it), but never overlaid into the workspace or committed to the PR."""
+    monkeypatch.setenv("AGENTBRIDGE_WORKTREE_DIR", str(tmp_path.parent / "wt"))
+    monkeypatch.setenv("AGENTBRIDGE_STATE_DIR", str(tmp_path.parent / "state"))
+    _init_repo(tmp_path)
+    monkeypatch.setitem(registry._ADAPTERS, "fake", FakeAdapter)
+    from agentbridge import git_service
+    monkeypatch.setattr(git_service.GitService, "push", lambda self, *a, **k: None)
+    monkeypatch.setattr(git_service.GitService, "create_pull_request",
+                        lambda self, **k: git_service.PullRequest(url="https://example/pull/1", number=1))
+
+    # An *uncommitted* skill in the workspace.
+    skill = tmp_path / ".claude" / "skills" / "my-skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: my-skill\ndescription: do the thing\n---\nSteps.\n")
+
+    sent: list[P.ServerMessage] = []
+
+    async def send(m: P.ServerMessage) -> None:
+        sent.append(m)
+
+    session = _make_session(tmp_path, send)
+    await session.handle(P.UserMessage(type="user_message", chat_id=session.chat_id, text="go"))
+    # The agent's worktree has the workspace's (uncommitted) skill.
+    assert (session.worktree_path / ".claude" / "skills" / "my-skill" / "SKILL.md").is_file()
+    # The copied config is excluded from the live overlay set.
+    assert not any(p.startswith(".claude/") for p in session.changed_paths())
+
+    await session.handle(P.CreatePR(type="create_pr", chat_id=session.chat_id, title="Add a file"))
+    assert "pr_created" in [m.type for m in sent]
+    committed = subprocess.run(
+        ["git", "show", "--name-only", "--format=", session.record.worktree_branch],
+        cwd=tmp_path, capture_output=True, text=True,
+    ).stdout
+    assert "agent_made_this.txt" in committed and ".claude" not in committed
+
+
 async def test_session_pr_failure_preserves_changes_then_retry_succeeds(tmp_path: Path, monkeypatch):
     """A failed PR must NOT lose the agent's work: the change stays in the chat's worktree and a
     retry succeeds (even though the first attempt already committed before push failed)."""

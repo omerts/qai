@@ -526,9 +526,13 @@ class GitService:
     # Commit / push
     # --------------------------------------------------------------------- #
 
-    def commit_all(self, message: str) -> str | None:
-        """Stage everything and commit. Returns the commit sha, or None if nothing to commit."""
-        self.repo.git.add("--all")
+    def commit_all(self, message: str, exclude: list[str] | None = None) -> str | None:
+        """Stage everything (optionally excluding pathspecs) and commit. Returns the commit sha,
+        or None if nothing to commit."""
+        if exclude:
+            self.repo.git.add("--all", "--", ".", *[f":(exclude){p}" for p in exclude])
+        else:
+            self.repo.git.add("--all")
         # Anything staged relative to HEAD? (handles the initial-commit case too)
         staged = (
             self.repo.index.diff("HEAD")
