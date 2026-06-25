@@ -241,6 +241,30 @@ async def test_session_create_pr_resets_workspace(tmp_path: Path, monkeypatch):
     assert not session.git.has_uncommitted_changes()
 
 
+def test_pr_meta_drops_agent_filler(tmp_path: Path, monkeypatch):
+    """A chatty agent reply (filler lead-in + bulleted list) must not become the PR title, and the
+    body must drop the 'Done. Here's a summary…' preamble while keeping the real content."""
+    monkeypatch.setenv("AGENTBRIDGE_STATE_DIR", str(tmp_path.parent / "state"))
+    _init_repo(tmp_path)
+    session = _make_session(tmp_path, lambda m: _noop())
+    session.record.transcript = [
+        {"kind": "user", "text": "style inline code refs like the Figma node"},
+        {"kind": "agent", "text": (
+            "Done. Here's a summary of what changed:\n\n"
+            "InlineCode component — a <code> element styled per Figma node 453:4180:\n\n"
+            "Font: Inconsolata, monospace\n"
+            "Background: rgba(227,225,231,0.10)\n"
+        )},
+    ]
+    title, body = session._pr_meta(None, None, ["src/InlineCode.tsx"])
+    # Title comes from the request, not the agent's "Done. Here's a summary…:" line.
+    assert title == "Style inline code refs like the Figma node"
+    assert "Done. Here's a summary" not in body and "Here's a summary" not in body
+    assert "InlineCode component" in body          # real content kept
+    assert "`src/InlineCode.tsx`" in body          # files listed
+    assert "## Summary" in body and "## Files changed" in body
+
+
 async def test_session_pr_failure_preserves_changes_then_retry_succeeds(tmp_path: Path, monkeypatch):
     """The reported bug: a failed PR must NOT lose the agent's work. The workspace is left intact
     and a retry succeeds."""

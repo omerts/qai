@@ -214,21 +214,22 @@ def test_second_pr_does_not_commit_manual_changes(client):
         assert "manual.txt" in porcelain
 
 
-def test_pr_title_auto_derived_from_agent_summary(client):
-    """With no title typed, the backend names the PR from the agent's own reply."""
+def test_pr_title_auto_derived_from_request(client):
+    """With no title typed, the backend names the PR from the user's request (a reliable one-line
+    intent), and the body carries the agent's summary plus the changed files."""
     tc, repo, pr_payloads = client
     with tc.websocket_connect("/ws") as ws:
         ws.send_json({"type": "start_session", "agent": "fake", "title": "feat"})
         chat_id = _recv_until(ws, "session_started")["chat_id"]
         ws.send_json({"type": "user_message", "chat_id": chat_id, "text": "add a feature"})
         _recv_until(ws, "file_changes")
-        # No title field at all -> derived from the agent's "Added feature.txt" reply.
         ws.send_json({"type": "create_pr", "chat_id": chat_id})
         _recv_until(ws, "pr_created")
     assert pr_payloads, "PR API was not called"
     payload = pr_payloads[-1]
-    assert payload["title"] == "Added feature.txt"
-    assert "feature.txt" in payload["body"]  # body lists the changed file
+    assert payload["title"] == "Add a feature"     # from the request, capitalized — not agent filler
+    assert "feature.txt" in payload["body"]        # body lists the changed file
+    assert "Added feature.txt" in payload["body"]  # and carries the agent's summary
 
 
 def test_interactive_prompt_round_trip(client):

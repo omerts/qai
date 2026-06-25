@@ -468,17 +468,40 @@ class Session:
     # PR title / body
     # ------------------------------------------------------------------ #
 
+    # Lead-in / filler the agent tends to open its summary with — useless in a PR title or body.
+    _SUMMARY_PREAMBLE_RE = re.compile(
+        r"^(done|sure|ok(ay)?|great|perfect|all set|finished|complete|got it)\b[.! ]*$"
+        r"|here'?s (a |the )?(summary|what|breakdown|rundown|overview)"
+        r"|here is (a |the )?(summary|what|breakdown|rundown|overview)"
+        r"|summary of (the )?(changes|what)"
+        r"|what (i )?(changed|did)"
+        r"|i'?ve (made|implemented|added|done|completed)\b.*\b(changes|following|below)\b",
+        re.I,
+    )
+
     def _pr_meta(self, user_title: str | None, user_body: str | None, touched: list[str]) -> tuple[str, str]:
-        """Resolve the PR title and body. A title/body the user typed always wins; otherwise we
-        derive a meaningful title from the agent's own summary of what it did (its final reply),
-        and build a body from that summary plus the list of files it changed."""
+        """Resolve the PR title and body. A title/body the user typed always wins. Otherwise the
+        title is derived from the user's *request* (the most reliable one-line intent — the agent's
+        reply is verbose and often opens with filler), falling back to the agent summary; the body
+        is the agent's summary with that filler preamble stripped, plus the files it changed."""
         summary = self._last_agent_text()
         title = (user_title or "").strip()
         if not title:
-            title = self._title_from_summary(summary) or (self.record.title or "").strip() or "AgentBridge changes"
-        title = re.sub(r"\s+", " ", title).strip().strip('"').rstrip(".")[:72] or "AgentBridge changes"
+            title = (
+                self._title_from_request(self._first_user_text())
+                or self._title_from_summary(summary)
+                or (self.record.title or "").strip()
+                or "AgentBridge changes"
+            )
+        title = re.sub(r"\s+", " ", title).strip().strip('"').rstrip(".:")[:72] or "AgentBridge changes"
         body = (user_body or "").strip() or self._build_pr_body(summary, touched)
         return title, body
+
+    def _first_user_text(self) -> str:
+        for entry in self.record.transcript:
+            if entry.get("kind") == "user" and entry.get("text"):
+                return str(entry["text"]).strip()
+        return ""
 
     def _last_agent_text(self) -> str:
         for entry in reversed(self.record.transcript):
@@ -487,23 +510,52 @@ class Session:
         return ""
 
     @staticmethod
-    def _title_from_summary(summary: str) -> str:
-        """First meaningful line of the agent's reply, cleaned up into a one-line PR title."""
-        for line in summary.splitlines():
-            s = line.strip().lstrip("#-*•> ").strip()
-            s = re.sub(r"\s+", " ", s)
-            if len(s) >= 8:
-                return s[:72].rstrip(".")
-        return ""
+    def _title_from_request(text: str) -> str:
+        """Turn the user's request into a concise title: first sentence, capitalized, trimmed."""
+        s = re.sub(r"\s+", " ", (text or "").strip())
+        if len(s) < 4:
+            return ""
+        s = re.split(r"(?<=[.!?])\s", s, 1)[0].strip().rstrip(".")
+        if s:
+            s = s[0].upper() + s[1:]
+        return s[:72]
 
     @staticmethod
-    def _build_pr_body(summary: str, touched: list[str]) -> str:
+    def _title_from_summary(summary: str) -> str:
+        """First substantive sentence of the agent's reply — skipping filler and section headers."""
+        for line in summary.splitlines():
+            s = re.sub(r"[`*_#>]+", "", line).strip().lstrip("-•* ").strip()
+            s = re.sub(r"\s+", " ", s)
+            if len(s) < 8 or s.endswith(":"):          # too short, or a section header / lead-in
+                continue
+            if Session._SUMMARY_PREAMBLE_RE.search(s):  # "Done.", "Here's a summary…", etc.
+                continue
+            return re.split(r"(?<=[.!?])\s", s, 1)[0].rstrip(".")[:72]
+        return ""
+
+    @classmethod
+    def _strip_summary_preamble(cls, summary: str) -> str:
+        """Drop leading blank/filler lines ("Done. Here's a summary of what changed:") so the body
+        starts at the real content. Only strips from the top — never touches mid-body lines."""
+        lines = summary.splitlines()
+        i = 0
+        while i < len(lines):
+            s = re.sub(r"[`*_#>]+", "", lines[i]).strip()
+            if not s or cls._SUMMARY_PREAMBLE_RE.search(s):
+                i += 1
+                continue
+            break
+        return "\n".join(lines[i:]).strip()
+
+    @classmethod
+    def _build_pr_body(cls, summary: str, touched: list[str]) -> str:
         parts: list[str] = []
-        if summary:
-            parts.append(summary)
+        cleaned = cls._strip_summary_preamble(summary)
+        if cleaned:
+            parts.append("## Summary\n\n" + cleaned)
         if touched:
             files = "\n".join(f"- `{p}`" for p in sorted(touched))
-            parts.append(f"## Files changed\n{files}")
+            parts.append(f"## Files changed\n\n{files}")
         parts.append("_Opened via AgentBridge._")
         return "\n\n".join(parts)
 
