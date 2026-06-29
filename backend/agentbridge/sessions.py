@@ -129,6 +129,7 @@ class Session:
             "agent_response": self._on_agent_response,
             "stop": self._on_stop,
             "create_pr": self._on_create_pr,
+            "update_branch": self._on_update_branch,
         }.get(msg.type)
         if handler is not None:
             await handler(msg)  # type: ignore[arg-type]
@@ -307,23 +308,28 @@ class Session:
         if preamble:
             text = f"{preamble}\n\n---\n\n{text}"
 
+        await self._run_turn(text)
+
+    async def _run_turn(self, agent_input: str) -> None:
+        """Run one agent turn: stream events, attribute changed files, persist the reply + resume
+        id, mirror to the workspace if live, and return to idle. The user transcript entry and any
+        per-turn adapter toggles are set up by the caller."""
         self._turn_text = []
         await self.send(P.Status(chat_id=self.chat_id, state="working"))
 
-        # Snapshot the dirty set before the turn. Anything dirty *now* is the user's pre-existing
-        # work and must never be attributed to the agent; anything that becomes dirty during the
-        # turn is the agent's doing (this also catches edits made via Bash/sed that don't surface
-        # as edit-tool events).
+        # Snapshot the dirty set before the turn. Anything dirty *now* is pre-existing and must not
+        # be attributed to the agent; anything that becomes dirty during the turn is the agent's
+        # doing (also catches Bash/sed edits that don't surface as edit-tool events).
         before = self._dirty_paths()
 
         # Mark active only once we're committed to running the turn, and always clear it in the
-        # finally — otherwise an exception before/around the loop would wedge the chat as
-        # perpetually "working" and block Stop. The lock serializes turns *within this chat*;
-        # different chats run in parallel (each in its own worktree).
+        # finally — otherwise an exception around the loop would wedge the chat as perpetually
+        # "working" and block Stop. The lock serializes turns *within this chat*; different chats
+        # run in parallel (each in its own worktree).
         self._turn_active = True
         async with self._turn_lock:
             try:
-                async for event in self.adapter.send(text):  # type: ignore[union-attr]
+                async for event in self.adapter.send(agent_input):  # type: ignore[union-attr]
                     await self._emit(event)
             except Exception as exc:  # noqa: BLE001
                 await self.send(P.ErrorMessage(message=f"Agent run failed: {exc}", chat_id=self.chat_id))
@@ -353,6 +359,84 @@ class Session:
             P.FileChanges(chat_id=self.chat_id, files=[P.FileChange(**f) for f in self.record.files])
         )
         await self.send(P.Status(chat_id=self.chat_id, state="idle"))
+
+    async def _on_update_branch(self, msg: P.UpdateBranch) -> None:
+        """Merge the latest base ("main") into this chat's branch; if it conflicts, have the agent
+        resolve and then complete the merge."""
+        if self._turn_active:
+            await self.send(P.ErrorMessage(message="The agent is still working — try again when it's idle.", chat_id=self.chat_id))
+            return
+        await self._ensure_worktree_async()
+        base = self.record.base_branch or "main"
+        await self.send(P.SystemNote(chat_id=self.chat_id, text=f"Updating from {base}…"))
+        try:
+            status, conflicts = await asyncio.to_thread(
+                self.git.update_from_base, base, "origin", self.github_token
+            )
+        except GitError as exc:
+            await self.send(P.ErrorMessage(message=f"Couldn't update from {base}: {exc}", chat_id=self.chat_id))
+            return
+
+        if status == "up_to_date":
+            await self.send(P.SystemNote(chat_id=self.chat_id, text=f"Already up to date with {base}."))
+            return
+        if status == "merged":
+            await self._after_merge_synced(f"Updated from {base} — no conflicts.")
+            return
+
+        # Conflicts: ask the agent to resolve them, then complete the merge.
+        await self.send(P.SystemNote(
+            chat_id=self.chat_id,
+            text=f"Merging {base} hit conflicts in {len(conflicts)} file(s) — asking the agent to resolve…",
+        ))
+        try:
+            await self._ensure_adapter()
+        except Exception as exc:  # noqa: BLE001
+            await self.send(P.ErrorMessage(message=f"Could not start agent to resolve conflicts: {exc}", chat_id=self.chat_id))
+            return
+        self.adapter.set_auto_approve(True)  # let it edit freely to resolve  # type: ignore[union-attr]
+        self.adapter.set_mode(None); self.adapter.set_model(None); self.adapter.set_effort(None)  # type: ignore[union-attr]
+        self.record.transcript.append({"kind": "user", "text": f"Resolve the merge conflicts from {base}."})
+        self.store.save(self.record)
+        await self.notify_chats()
+        await self._run_turn(self._conflict_prompt(base, conflicts))
+
+        # The agent edits files but doesn't `git add`, so check for leftover markers, not the index.
+        remaining = await asyncio.to_thread(self.git.conflict_markers_remaining, conflicts)
+        if remaining:
+            await self.send(P.SystemNote(
+                chat_id=self.chat_id,
+                text=("Still " + str(len(remaining)) + " conflicted file(s): "
+                      + ", ".join(remaining[:5]) + ". Ask the agent to finish, or resolve manually. "
+                      "(The merge is in progress — Create PR is paused until it's resolved.)"),
+            ))
+            return
+        try:
+            await asyncio.to_thread(self.git.complete_merge, f"Merge {base} into {self.record.worktree_branch}")
+        except GitError as exc:
+            await self.send(P.ErrorMessage(message=f"Resolved the files but couldn't complete the merge: {exc}", chat_id=self.chat_id))
+            return
+        await self._after_merge_synced(f"Conflicts resolved — merge from {base} completed.")
+
+    async def _after_merge_synced(self, note: str) -> None:
+        """Shared tail after a successful update: refresh the file list, mirror if live, notify."""
+        await self.live_mirror(self.chat_id, self.changed_paths())
+        await self._refresh_files()
+        self.store.save(self.record)
+        await self.notify_chats()
+        await self._send_file_changes()
+        await self.send(P.SystemNote(chat_id=self.chat_id, text=note))
+
+    @staticmethod
+    def _conflict_prompt(base: str, conflicts: list[str]) -> str:
+        files = "\n".join(f"- {p}" for p in conflicts)
+        return (
+            f"A merge of the latest `{base}` into this branch produced conflicts. Resolve ALL of "
+            "them: open each conflicted file, integrate both sides correctly, and remove every "
+            "conflict marker (`<<<<<<<`, `=======`, `>>>>>>>`). Make sure the result is correct and "
+            "consistent. Do NOT run git commit or git merge — just edit the files to resolve.\n\n"
+            f"Conflicted files:\n{files}"
+        )
 
     async def _on_agent_response(self, msg: P.AgentResponse) -> None:
         if self.adapter is not None:
@@ -420,6 +504,12 @@ class Session:
         """Commit the chat's worktree changes onto its branch, push, and open a PR. The agent
         already worked in this chat's private worktree, so there's nothing to relocate."""
         await self._ensure_worktree_async()
+        if await asyncio.to_thread(self.git.merge_in_progress):
+            await self.send(P.ErrorMessage(
+                message="A merge from main is still in progress — resolve it first, then create the PR.",
+                chat_id=self.chat_id,
+            ))
+            return
         # Files the agent edited that are still uncommitted, plus anything already committed on the
         # branch (so a retry after a push failure — where the commit already landed — still works).
         touched = [p for p in self.record.touched if self.git.is_path_dirty(p)]

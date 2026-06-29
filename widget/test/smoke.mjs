@@ -250,6 +250,16 @@ async function main() {
   assert.ok(!slash.classList.contains("show"), "menu closes after accept");
   widget.input.value = ""; widget._hideSlash();
 
+  // --- Update from main: button sends update_branch; system_note renders as a system message ---
+  sent.length = 0; widget.activeChatId = "c1"; widget.running = false;
+  widget._updateFromMain();
+  assert.ok(sent.some((m) => m.type === "update_branch" && m.chat_id === "c1"), "update_branch not sent");
+  widget.bridge.reset();
+  widget._onMessage({ type: "system_note", chat_id: "c1", text: "Updated from main — no conflicts." });
+  await tick();
+  assert.ok(/Updated from main/.test(widget.shadow.textContent), "system_note not rendered");
+  widget.bridge.reset(); widget.activeChatId = null;
+
   // --- Modes: the picker shows only for agents that support it, and rides on the message ---
   widget._onAgents([
     { name: "claude-code", label: "Claude Code", available: true, capabilities: { plan_mode: true },

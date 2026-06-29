@@ -215,6 +215,70 @@ class FakeAdapter(AgentAdapter):
         pass
 
 
+class ResolvingAdapter(AgentAdapter):
+    """A fake agent that 'resolves' a merge by rewriting any conflicted files without markers."""
+
+    name = "fake"
+    label = "Fake"
+
+    @classmethod
+    def is_available(cls) -> bool:
+        return True
+
+    def capabilities(self) -> Capabilities:
+        return Capabilities()
+
+    async def start(self, ctx: SessionContext) -> None:
+        pass
+
+    async def send(self, text: str):
+        out = subprocess.run(
+            ["git", "diff", "--name-only", "--diff-filter=U"],
+            cwd=self.workspace, capture_output=True, text=True,
+        ).stdout
+        for f in out.split():
+            (self.workspace / f).write_text("resolved both sides\n")
+            yield AgentEvent.file(f)
+        yield AgentEvent.chunk("Resolved the conflicts.")
+        yield AgentEvent.done()
+
+    async def stop(self) -> None:
+        pass
+
+
+async def test_update_from_main_agent_resolves_conflicts(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("AGENTBRIDGE_WORKTREE_DIR", str(tmp_path.parent / "wt"))
+    monkeypatch.setenv("AGENTBRIDGE_STATE_DIR", str(tmp_path.parent / "state"))
+    _init_repo(tmp_path)
+    (tmp_path / "f.txt").write_text("base\n")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "base f"], cwd=tmp_path, check=True)
+    monkeypatch.setitem(registry._ADAPTERS, "fake", ResolvingAdapter)
+
+    sent: list[P.ServerMessage] = []
+
+    async def send(m: P.ServerMessage) -> None:
+        sent.append(m)
+
+    session = _make_session(tmp_path, send)
+    await session._ensure_worktree_async()
+    wt = session.worktree_path
+
+    # Diverge: change f.txt on the chat's branch and (differently) on main.
+    (wt / "f.txt").write_text("branch change\n")
+    session.git.repo.git.add("."); session.git.repo.git.commit("-m", "f on branch")
+    (tmp_path / "f.txt").write_text("main change\n")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "f on main"], cwd=tmp_path, check=True)
+
+    await session.handle(P.UpdateBranch(type="update_branch", chat_id=session.chat_id))
+
+    notes = [m.text for m in sent if m.type == "system_note"]
+    assert any("completed" in n for n in notes), notes
+    assert not session.git.merge_in_progress()
+    assert "<<<<<<<" not in (wt / "f.txt").read_text()
+
+
 async def test_session_edits_in_its_own_worktree(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("AGENTBRIDGE_WORKTREE_DIR", str(tmp_path.parent / "wt"))
     monkeypatch.setenv("AGENTBRIDGE_STATE_DIR", str(tmp_path.parent / "state"))

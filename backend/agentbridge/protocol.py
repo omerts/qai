@@ -176,6 +176,14 @@ class EndSession(BaseModel):
     chat_id: str | None = None
 
 
+class UpdateBranch(BaseModel):
+    """Merge the latest base branch ("main") into this chat's branch; the agent resolves any
+    conflicts."""
+
+    type: Literal["update_branch"]
+    chat_id: str
+
+
 class GoLive(BaseModel):
     """Make this chat the one the dev server previews: its worktree changes are overlaid onto the
     workspace (where the dev server watches) so it hot-reloads. chat_id=None clears the preview."""
@@ -223,6 +231,7 @@ ClientMessage = Annotated[
         StopAgent,
         CreatePR,
         EndSession,
+        UpdateBranch,
         GoLive,
         ListSkills,
         ListMcp,
@@ -374,6 +383,14 @@ class Status(ServerMessage):
     type: Literal["status"] = "status"
     chat_id: str
     state: str  # idle | thinking | working | done
+
+
+class SystemNote(ServerMessage):
+    """A neutral status note shown in the chat (e.g. merge progress) — not an error."""
+
+    type: Literal["system_note"] = "system_note"
+    chat_id: str
+    text: str
 
 
 class ErrorMessage(ServerMessage):

@@ -188,6 +188,7 @@ One connection runs many chats (**+** to start, **☰** to browse/reopen/delete)
 - **True parallelism.** Each chat runs its agent in its **own git worktree** (a private branch + working dir), so chats run **at the same time** without stepping on each other. The chat list shows a pulsing dot for any chat that's currently working.
 - **One live preview.** Your dev server watches the workspace, which can only mirror one chat at a time. Click **Go live** on a chat to make the workspace reflect *its* changes (hot-reload); a **● Live** badge marks it. Switching reverts the previous chat's overlay and applies the new one. The first chat goes live automatically, so single-chat use feels instant.
 - **Create PR** commits the chat's worktree branch and opens the PR — nothing to relocate, and one chat's edits never leak into another's PR.
+- **Update from main.** The ⟳ button merges the latest base branch into the chat's branch. If it conflicts, the agent is asked to **resolve the conflicts automatically** and the merge is completed; if anything's left unresolved you're told which files (and Create PR is paused until the merge finishes).
 
 > Caveat: only one chat can be previewed (live) at a time, and the live overlay is scoped to the agent's files — manual edits you make to the *same* files a previewed chat changed may be reverted when switching. Across a reconnect the in-memory live state resets.
 

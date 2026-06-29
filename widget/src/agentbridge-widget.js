@@ -32,6 +32,8 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   var STOP_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>';
   // Paperclip "attach file" icon.
   var ATTACH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
+  // "Update from main" (sync) icon.
+  var UPDATE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>';
   // Puzzle-piece "plugins" icon.
   var PLUGIN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3a2 2 0 0 1 4 0v1h3a1 1 0 0 1 1 1v3h1a2 2 0 0 1 0 4h-1v3a1 1 0 0 1-1 1h-3v1a2 2 0 0 1-4 0v-1H7a1 1 0 0 1-1-1v-3H5a2 2 0 0 1 0-4h1V5a1 1 0 0 1 1-1h3z"/></svg>';
 
@@ -214,6 +216,11 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.modeSelect.addEventListener("change", function () { self._selectMode(); });
     this.prBtn = h("button", { class: "ab-btn", text: "Create PR", title: "Commit only the agent's edits to a new branch and open a pull request (your other changes stay put). Type a title first to name it, or leave blank to auto-name from the agent's summary." });
     this.prBtn.addEventListener("click", function () { self._createPR(); });
+    this.updateBtn = h("button", { class: "ab-iconbtn ab-update ab-tip" });
+    this.updateBtn.innerHTML = UPDATE_ICON;
+    this.updateBtn.setAttribute("data-tip", "Update this chat from main — the agent resolves any conflicts.");
+    this.updateBtn.setAttribute("aria-label", "Update from main");
+    this.updateBtn.addEventListener("click", function () { self._updateFromMain(); });
     this.inspectBtn = h("button", { class: "ab-iconbtn ab-inspect ab-tip" });
     this.inspectBtn.innerHTML = INSPECT_ICON;
     this.inspectBtn.setAttribute("data-tip", INSPECT_TIP_OFF);
@@ -229,7 +236,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     this.pluginsBtn.addEventListener("click", function () { self._togglePlugins(); });
     this.branchLabel = h("span", { class: "ab-branch-label" });
     var controls = h("div", { class: "ab-controls" }, [
-      this.agentSelect, this.modelSelect, this.effortSelect, this.modeSelect, this.prBtn, this.inspectBtn, this.autoBtn, this.pluginsBtn, this.branchLabel,
+      this.agentSelect, this.modelSelect, this.effortSelect, this.modeSelect, this.prBtn, this.updateBtn, this.inspectBtn, this.autoBtn, this.pluginsBtn, this.branchLabel,
     ]);
     this._refreshAutoApproveBtn();
 
@@ -690,6 +697,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
       case "file_changes": return this._isActive(msg) && this._onFileChanges(msg.files);
       case "file_uploaded": return this._isActive(msg) && this._onFileUploaded(msg);
       case "pr_created": return this._isActive(msg) && this._prLink(msg.url, msg.number);
+      case "system_note": return this._isActive(msg) && this.bridge.addSystem(msg.text);
       case "status":
         // Track every chat's running state (so the chat list shows which are working), and drive
         // the active chat's composer/stop UI as before.
@@ -1048,6 +1056,13 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     if (this.prNotes && this.prNotes.trim()) msg.notes = this.prNotes;   // configured PR notes
     this._send(msg);
     this._system(typed ? "Creating pull request…" : "Summarizing changes and creating pull request…");
+  };
+
+  AgentBridgeWidget.prototype._updateFromMain = function () {
+    if (!this.activeChatId) return this._newChatHint();
+    if (this.running) { this._system("Wait for the agent to finish, then update from main."); return; }
+    this._send({ type: "update_branch", chat_id: this.activeChatId });
+    this._system("Updating from main…");
   };
 
   // ---- Page context collection ----------------------------------------- //
@@ -1676,6 +1691,7 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
 
   AgentBridgeWidget.prototype._setChatActive = function (on) {
     this.prBtn.disabled = !on;
+    this.updateBtn.disabled = !on;
     this.inspectBtn.disabled = !on;
     this.attachBtn.disabled = !on;
     this.sendBtn.disabled = !on;

@@ -158,6 +158,8 @@
 .ab-iconbtn.ab-autoapprove.active { color: #fff; background: #16a34a; }
 .ab-iconbtn.ab-pluginsbtn { display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; padding: 4px; }
 .ab-iconbtn.ab-pluginsbtn svg { width: 16px; height: 16px; }
+.ab-iconbtn.ab-update { display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; padding: 4px; }
+.ab-iconbtn.ab-update svg { width: 16px; height: 16px; }
 
 /* Hover tooltip for icon buttons (text from the data-tip attribute). Anchored to the
    button's right edge so it expands leftward and stays inside the panel's clipped box. */

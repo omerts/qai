@@ -54,6 +54,41 @@ def test_gitservice_marks_workspace_safe(repo: Path):
     assert str(repo) in _safe_dirs()
 
 
+def test_update_from_base_merge_and_conflict(repo: Path, monkeypatch):
+    monkeypatch.setenv("AGENTBRIDGE_WORKTREE_DIR", str(repo.parent / "wt"))
+    svc = GitService(repo)
+    (repo / "f.txt").write_text("base\n")
+    svc.repo.git.add("."); svc.repo.git.commit("-m", "base f")
+
+    wt = svc.ensure_worktree("agentbridge/x", base="main")
+    wtsvc = GitService(wt)
+
+    # Clean update: advance main, merge it into the worktree branch.
+    (repo / "g.txt").write_text("new\n")
+    svc.repo.git.add("."); svc.repo.git.commit("-m", "add g on main")
+    status, conflicts = wtsvc.update_from_base("main")
+    assert status == "merged" and not conflicts and (wt / "g.txt").exists()
+
+    # Up to date now.
+    assert wtsvc.update_from_base("main")[0] == "up_to_date"
+
+    # Conflict: change f.txt on both main and the worktree branch.
+    (repo / "f.txt").write_text("main change\n")
+    svc.repo.git.add("."); svc.repo.git.commit("-m", "f on main")
+    (wt / "f.txt").write_text("branch change\n")
+    wtsvc.repo.git.add("."); wtsvc.repo.git.commit("-m", "f on branch")
+    status, conflicts = wtsvc.update_from_base("main")
+    assert status == "conflicts" and "f.txt" in conflicts
+    assert wtsvc.merge_in_progress()
+    assert wtsvc.conflict_markers_remaining(["f.txt"]) == ["f.txt"]
+
+    # Resolve + complete.
+    (wt / "f.txt").write_text("both changes\n")
+    assert wtsvc.conflict_markers_remaining(["f.txt"]) == []
+    wtsvc.complete_merge("Merge main")
+    assert not wtsvc.merge_in_progress()
+
+
 def test_create_branch_switches(repo: Path):
     svc = GitService(repo)
     branch = svc.create_branch("agentbridge/fix-thing")

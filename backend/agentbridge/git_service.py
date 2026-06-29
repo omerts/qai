@@ -550,6 +550,78 @@ class GitService:
     def has_uncommitted_changes(self) -> bool:
         return self.repo.is_dirty(untracked_files=True)
 
+    def unmerged_files(self) -> list[str]:
+        """Paths with unresolved merge conflicts (unmerged in the index)."""
+        try:
+            out = self.repo.git.diff("--name-only", "--diff-filter=U")
+        except GitCommandError:
+            return []
+        return [line.strip() for line in out.splitlines() if line.strip()]
+
+    def merge_in_progress(self) -> bool:
+        return (Path(self.repo.git_dir) / "MERGE_HEAD").exists()
+
+    def conflict_markers_remaining(self, files: list[str]) -> list[str]:
+        """Of ``files``, those that still contain conflict markers. Used after the agent edits to
+        decide if the merge can be completed (the agent removes markers but doesn't ``git add``,
+        so the index still reports them unmerged — markers are the real signal)."""
+        out: list[str] = []
+        for rel in files:
+            try:
+                text = (self.workspace / rel).read_text(errors="replace")
+            except OSError:
+                continue
+            if re.search(r"^(<{7}|>{7})", text, re.M):
+                out.append(rel)
+        return out
+
+    def update_from_base(
+        self, base: str, remote: str = "origin", token: str | None = None
+    ) -> tuple[str, list[str]]:
+        """Merge the latest ``base`` (fetched from the remote when possible, else the local branch)
+        into this worktree's branch. Returns ``(status, conflicts)`` where status is one of
+        ``up_to_date`` | ``merged`` | ``conflicts``. On ``conflicts`` the merge is left in progress
+        for resolution (see :meth:`complete_merge` / :meth:`abort_merge`)."""
+        ref = base
+        url = self._authed_push_url(remote, token) or remote
+        try:
+            self.repo.git.fetch(url, base)
+            ref = "FETCH_HEAD"
+        except GitCommandError:
+            ref = base  # offline / no remote / not a GitHub remote — merge the local base branch
+        try:
+            behind = self.repo.git.rev_list("--count", f"HEAD..{ref}").strip()
+        except GitCommandError as exc:
+            raise GitError(f"Couldn't compare against '{base}': {exc}") from exc
+        if behind == "0":
+            return ("up_to_date", [])
+        try:
+            self.repo.git.merge("--no-edit", ref)
+            return ("merged", [])
+        except GitCommandError as exc:
+            conflicts = self.unmerged_files()
+            if conflicts:
+                return ("conflicts", conflicts)
+            self.abort_merge()
+            raise GitError(f"Merge of '{base}' failed: {exc}") from exc
+
+    def complete_merge(self, message: str | None = None) -> None:
+        """Finish an in-progress merge once conflicts are resolved (stages everything first)."""
+        self.repo.git.add("--all")
+        try:
+            if message:
+                self.repo.git.commit("-m", message)
+            else:
+                self.repo.git.commit("--no-edit")
+        except GitCommandError as exc:
+            raise GitError(f"Couldn't complete the merge: {exc}") from exc
+
+    def abort_merge(self) -> None:
+        try:
+            self.repo.git.merge("--abort")
+        except GitCommandError:
+            pass
+
     def _authed_push_url(self, remote: str, token: str | None) -> str | None:
         """An HTTPS push URL with the token embedded, for GitHub remotes.
 
