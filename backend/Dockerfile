@@ -31,12 +31,15 @@ RUN git config --system --add safe.directory '*'
 # (a mismatched pair fails every permission check with a Zod validation error).
 RUN npm install -g @anthropic-ai/claude-code@2 && npm cache clean --force
 
-# Cursor CLI (cursor-agent), so the optional "cursor" agent works headless — authenticate at
-# runtime with CURSOR_API_KEY (see docker-compose.yml). Best-effort: a failure here must NOT break
-# the image (Claude Code stays the default agent), and it's put on the global PATH for the app user.
-RUN (curl https://cursor.com/install -fsS | bash \
-     && cp -L /root/.local/bin/cursor-agent /usr/local/bin/cursor-agent) \
-    || echo "cursor-agent not installed at build time; the Cursor agent will show as unavailable"
+# Cursor CLI (cursor-agent), so the "cursor" agent works headless — authenticate at runtime with
+# CURSOR_API_KEY (see docker-compose.yml). cursor-agent is a wrapper that needs its bundled node +
+# JS siblings, so keep the whole install tree (installed under /opt/cursor via HOME) world-readable
+# and symlink it onto the PATH — the container runs as the non-root app user. `--version` verifies
+# the install (as root and, implicitly via a+rX, for the app user), failing the build if it broke.
+RUN curl https://cursor.com/install -fsSL | HOME=/opt/cursor bash \
+    && chmod -R a+rX /opt/cursor \
+    && ln -sf /opt/cursor/.local/bin/cursor-agent /usr/local/bin/cursor-agent \
+    && cursor-agent --version
 
 WORKDIR /app
 
