@@ -10,15 +10,15 @@ Validated against ``cursor-agent`` 2026.03.x. Relevant flags (from ``cursor-agen
   --force / --yolo             allow commands unless explicitly denied
   --trust                      trust the workspace without prompting (headless only)
   --approve-mcps               auto-approve MCP servers (headless can't answer a prompt)
-  create-chat                  command that prints a new chat id
 
 Why ``--force`` and ``--trust`` matter: without them a headless run can *block* waiting
 on an approval/trust prompt that no one can answer over our pipe, hanging the turn. Cursor
 in ``--print`` mode does not ask us mid-run, so this adapter is non-interactive.
 
-Multi-turn continuity: we mint a chat id with ``create-chat`` at session start and pass it
-to every turn via ``--resume``. If ``create-chat`` is unavailable we capture the
-``session_id`` emitted in the stream and reuse it for subsequent turns.
+Multi-turn continuity: the first turn runs without ``--resume``; we capture the
+``session_id`` (aka chat id) emitted in its stream and pass it to every subsequent turn via
+``--resume``. We do NOT pre-mint an id with ``cursor-agent create-chat`` — that subcommand
+isn't in every CLI version and can block on an interactive prompt, hanging session start.
 
 Parity with the Claude adapter, within what the headless CLI exposes:
 - Model selection — ``--model`` (see :meth:`models`); no effort/plan mode headless.
@@ -135,28 +135,14 @@ class CursorAdapter(AgentAdapter):
         # CLAUDE.md into the first turn if that's the only project-instructions file present.
         self._write_mcp_config(ctx.mcp_servers or {})
         self._preamble = self._read_preamble()
-        # Resume a prior chat if we have its id; otherwise mint a fresh one.
-        self._chat_id = ctx.resume or await self._create_chat()
+        # Resume a prior chat if we have its id; otherwise start fresh and capture the chat id
+        # from the first turn's stream (see _parse_line). We deliberately do NOT pre-mint one via
+        # `cursor-agent create-chat`: that subcommand isn't in every CLI version and, run without
+        # `--print`, can block on an interactive prompt — hanging the whole session at start.
+        self._chat_id = ctx.resume
 
     def resume_handle(self) -> str | None:
         return self._chat_id
-
-    async def _create_chat(self) -> str | None:
-        """Mint a fresh chat id via ``cursor-agent create-chat`` (best-effort)."""
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                _BINARY, "create-chat",
-                cwd=str(self.workspace),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            out, _ = await proc.communicate()
-        except OSError:
-            return None
-        if proc.returncode != 0:
-            return None
-        chat_id = out.decode(errors="replace").strip().splitlines()[-1].strip() if out.strip() else None
-        return chat_id or None
 
     def _write_mcp_config(self, sdk_servers: dict) -> None:
         """Translate the user's enabled MCP servers (SDK ``{name: cfg}`` shape) into Cursor's
