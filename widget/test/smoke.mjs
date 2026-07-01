@@ -424,9 +424,17 @@ async function main() {
   widget._applyTheme();
   assert.equal(widget.root.style.getPropertyValue("--ab-accent"), "#111827", "session agent accent not applied");
 
+  // Picking an agent in the dropdown immediately previews its theme (even mid-chat with another).
+  widget.sessionAgent = "claude-code"; widget.activeChatId = "c1";
+  widget.agentSelect.value = "cursor";
+  widget._selectAgent();
+  assert.equal(widget.root.style.getPropertyValue("--ab-accent"), "#111827", "picking Cursor should apply Cursor's theme");
+  widget.activeChatId = null;
+
   // No active agent (or one without a theme) falls back to the default accent.
   widget.sessionAgent = null;
   widget.selectedAgent = null;
+  widget.agentSelect.value = "";
   widget._applyTheme();
   assert.equal(widget.root.style.getPropertyValue("--ab-accent"), "", "accent not reset to default");
 

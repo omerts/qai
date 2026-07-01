@@ -787,7 +787,9 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   AgentBridgeWidget.prototype._selectAgent = function () {
     this.selectedAgent = this.agentSelect.value || null;
     if (this.selectedAgent) lsSet(LS_AGENT, this.selectedAgent);
-    this._applyTheme();
+    // Preview the picked agent immediately (theme + its pickers) — a chat's agent is fixed, so
+    // the dropdown reflects the agent you're choosing for your next chat.
+    this._applyThemeFor(this.selectedAgent);
     // First-run convenience: if nothing is open yet, start a chat right away.
     if (this.selectedAgent && !this.activeChatId) this._newChat();
   };
@@ -1592,16 +1594,30 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   };
 
   AgentBridgeWidget.prototype._applyTheme = function () {
+    this._applyThemeFor(this._activeAgentName());
+  };
+
+  AgentBridgeWidget.prototype._agentByName = function (name) {
+    for (var i = 0; i < this.agents.length; i++) {
+      if (this.agents[i].name === name) return this.agents[i];
+    }
+    return null;
+  };
+
+  // Apply a specific agent's accent theme + refresh the per-agent pickers (model/effort/mode) to
+  // that agent's capabilities.
+  AgentBridgeWidget.prototype._applyThemeFor = function (name) {
     if (!this.root) return;
-    var theme = this._agentTheme(this._activeAgentName());
+    var agent = this._agentByName(name);
+    var theme = (agent && agent.theme) || null;
     var vars = { accent: "--ab-accent", accentFg: "--ab-accent-fg" };
     for (var key in vars) {
       if (theme && theme[key]) this.root.style.setProperty(vars[key], theme[key]);
       else this.root.style.removeProperty(vars[key]);
     }
-    this._updateModeVisibility();
-    this._updateModelOptions();
-    this._updateEffortOptions();
+    this._updateModeVisibility(agent);
+    this._updateModelOptions(agent);
+    this._updateEffortOptions(agent);
   };
 
   // The agent record currently in effect, or null.
@@ -1620,9 +1636,10 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   };
 
   // Only show the mode picker for agents that support modes (e.g. Claude's plan mode).
-  AgentBridgeWidget.prototype._updateModeVisibility = function () {
+  AgentBridgeWidget.prototype._updateModeVisibility = function (agent) {
     if (!this.modeSelect) return;
-    this.modeSelect.hidden = !this._activeAgentCaps().plan_mode;
+    agent = agent || this._activeAgent();
+    this.modeSelect.hidden = !((agent && agent.capabilities) || {}).plan_mode;
   };
 
   // Fill a <select> from agent-advertised options [{id,label}]; hide it if none. Returns the
@@ -1642,15 +1659,15 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     return current;
   };
 
-  AgentBridgeWidget.prototype._updateModelOptions = function () {
+  AgentBridgeWidget.prototype._updateModelOptions = function (a) {
     if (!this.modelSelect) return;
-    var a = this._activeAgent();
+    a = a || this._activeAgent();
     this.modelId = this._fillAgentSelect(this.modelSelect, a && a.models, this.modelId);
   };
 
-  AgentBridgeWidget.prototype._updateEffortOptions = function () {
+  AgentBridgeWidget.prototype._updateEffortOptions = function (a) {
     if (!this.effortSelect) return;
-    var a = this._activeAgent();
+    a = a || this._activeAgent();
     this.effortId = this._fillAgentSelect(this.effortSelect, a && a.efforts, this.effortId);
   };
 
