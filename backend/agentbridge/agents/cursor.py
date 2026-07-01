@@ -6,8 +6,10 @@ Validated against ``cursor-agent`` 2026.03.x. Relevant flags (from ``cursor-agen
   --output-format <fmt>        text | json | stream-json
   --stream-partial-output      stream text deltas (needs --print + stream-json)
   --resume [chatId]            resume a specific chat (multi-turn continuity)
+  --model <model>              model to use (e.g. gpt-5, sonnet-4.5); see --list-models
   --force / --yolo             allow commands unless explicitly denied
   --trust                      trust the workspace without prompting (headless only)
+  --approve-mcps               auto-approve MCP servers (headless can't answer a prompt)
   create-chat                  command that prints a new chat id
 
 Why ``--force`` and ``--trust`` matter: without them a headless run can *block* waiting
@@ -17,6 +19,15 @@ in ``--print`` mode does not ask us mid-run, so this adapter is non-interactive.
 Multi-turn continuity: we mint a chat id with ``create-chat`` at session start and pass it
 to every turn via ``--resume``. If ``create-chat`` is unavailable we capture the
 ``session_id`` emitted in the stream and reuse it for subsequent turns.
+
+Parity with the Claude adapter, within what the headless CLI exposes:
+- Model selection — ``--model`` (see :meth:`models`); no effort/plan mode headless.
+- MCP plugins — the user's enabled servers are written to ``<worktree>/.cursor/mcp.json``
+  (Cursor's native discovery path) at session start, and ``--approve-mcps`` skips the
+  approval prompt. The file is kept out of PRs (``.cursor`` is excluded in sessions.py).
+- Project instructions — Cursor reads ``AGENTS.md``/``.cursor/rules``/``.cursorrules`` but
+  NOT ``CLAUDE.md``. If the workspace only has ``CLAUDE.md`` we bridge it in as a one-time
+  preamble on the first turn so the agent gets the same guidance (see :meth:`_read_preamble`).
 """
 
 from __future__ import annotations
@@ -38,11 +49,25 @@ class CursorAdapter(AgentAdapter):
     label = "Cursor"
     theme = {"accent": "#111827", "accentFg": "#ffffff"}  # Cursor near-black
 
+    #: Selectable models. Cursor's own source of truth is ``cursor-agent --list-models`` (which
+    #: needs auth + network, so we don't shell out to it on every connect); this curated set
+    #: tracks Cursor's documented CLI model aliases. ``""`` => Cursor's built-in auto default.
+    _MODELS = [
+        {"id": "", "label": "Auto (default)"},
+        {"id": "gpt-5", "label": "GPT-5"},
+        {"id": "sonnet-4.5", "label": "Sonnet 4.5"},
+        {"id": "sonnet-4.5-thinking", "label": "Sonnet 4.5 (thinking)"},
+        {"id": "opus-4.1", "label": "Opus 4.1"},
+        {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
+    ]
+
     def __init__(self, workspace: Path) -> None:
         super().__init__(workspace)
         self._chat_id: str | None = None
         self._proc: asyncio.subprocess.Process | None = None
         self._interrupted: bool = False
+        self._model_id: str | None = None  # selected model id (None/"" => Cursor default)
+        self._preamble: str = ""           # CLAUDE.md bridge text to inject on the first turn
 
     @classmethod
     def is_available(cls) -> bool:
@@ -52,11 +77,21 @@ class CursorAdapter(AgentAdapter):
         # cursor-agent --print is non-interactive (no mid-run prompts to us).
         return Capabilities(streaming=True, interactive=False, edits_files=True)
 
+    def models(self) -> list[dict[str, str]]:
+        return [dict(m) for m in self._MODELS]
+
+    def set_model(self, model: str | None) -> None:
+        self._model_id = model or None
+
     async def start(self, ctx: SessionContext) -> None:
         if not self.is_available():
             raise RuntimeError(
                 f"'{_BINARY}' not found on PATH. Install the Cursor CLI to use this agent."
             )
+        # Hand the user's enabled MCP plugins to Cursor via its native discovery file, and bridge
+        # CLAUDE.md into the first turn if that's the only project-instructions file present.
+        self._write_mcp_config(ctx.mcp_servers or {})
+        self._preamble = self._read_preamble()
         # Resume a prior chat if we have its id; otherwise mint a fresh one.
         self._chat_id = ctx.resume or await self._create_chat()
 
@@ -80,21 +115,94 @@ class CursorAdapter(AgentAdapter):
         chat_id = out.decode(errors="replace").strip().splitlines()[-1].strip() if out.strip() else None
         return chat_id or None
 
+    def _write_mcp_config(self, sdk_servers: dict) -> None:
+        """Translate the user's enabled MCP servers (SDK ``{name: cfg}`` shape) into Cursor's
+        ``<worktree>/.cursor/mcp.json`` so ``cursor-agent`` discovers them natively. Merges into
+        any existing file rather than clobbering the workspace's own servers. No-op when empty."""
+        translated: dict[str, dict] = {}
+        for name, cfg in (sdk_servers or {}).items():
+            if isinstance(cfg, dict):
+                out = self._sdk_to_cursor(cfg)
+                if out is not None:
+                    translated[name] = out
+        if not translated:
+            return
+        path = self.workspace / ".cursor" / "mcp.json"
+        existing: dict = {}
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text())
+                if isinstance(data, dict) and isinstance(data.get("mcpServers"), dict):
+                    existing = data["mcpServers"]
+            except (json.JSONDecodeError, OSError):
+                existing = {}
+        merged = {**existing, **translated}
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"mcpServers": merged}, indent=2))
+        except OSError:
+            pass  # a missing MCP file just means those plugins are unavailable this session
+
+    @staticmethod
+    def _sdk_to_cursor(cfg: dict) -> dict | None:
+        """One server, SDK shape -> Cursor ``mcp.json`` shape. Cursor infers transport from the
+        keys present (``command`` => stdio, ``url`` => remote), so we drop the ``type`` field."""
+        if cfg.get("type", "stdio") == "stdio":
+            command = cfg.get("command")
+            if not command:
+                return None
+            out: dict = {"command": command}
+            if cfg.get("args"):
+                out["args"] = list(cfg["args"])
+            if cfg.get("env"):
+                out["env"] = dict(cfg["env"])
+            return out
+        url = cfg.get("url")
+        if not url:
+            return None
+        out = {"url": url}
+        if cfg.get("headers"):
+            out["headers"] = dict(cfg["headers"])
+        return out
+
+    def _read_preamble(self) -> str:
+        """Bridge ``CLAUDE.md`` into Cursor, which doesn't read it natively. Skipped when the
+        workspace already has an ``AGENTS.md`` (Cursor reads that), so we never duplicate guidance."""
+        if (self.workspace / "AGENTS.md").is_file():
+            return ""
+        claude_md = self.workspace / "CLAUDE.md"
+        if not claude_md.is_file():
+            return ""
+        try:
+            return claude_md.read_text(errors="replace").strip()
+        except OSError:
+            return ""
+
     def _build_command(self, text: str) -> list[str]:
         cmd = [
             _BINARY,
             "--print",
             "--output-format", "stream-json",
             "--stream-partial-output",
-            "--force",   # don't block on command-approval prompts
-            "--trust",   # don't block on workspace-trust prompt (headless only)
+            "--force",          # don't block on command-approval prompts
+            "--trust",          # don't block on workspace-trust prompt (headless only)
+            "--approve-mcps",   # don't block on MCP-approval prompts
         ]
+        if self._model_id:
+            cmd += ["--model", self._model_id]
         if self._chat_id:
             cmd += ["--resume", self._chat_id]
         cmd += ["--", text]  # terminate options; prompt is positional
         return cmd
 
     async def send(self, text: str) -> AsyncIterator[AgentEvent]:  # type: ignore[override]
+        # On the first turn, prepend the bridged CLAUDE.md guidance (consumed once).
+        if self._preamble:
+            text = (
+                "Project instructions from CLAUDE.md (treat these as you would AGENTS.md):\n\n"
+                f"{self._preamble}\n\n---\n\n{text}"
+            )
+            self._preamble = ""
         cmd = self._build_command(text)
         self._interrupted = False
         try:

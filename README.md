@@ -144,7 +144,10 @@ Agents run _in your workspace_ and honor its own configuration:
 
 - **Claude Code** loads the workspace's `.claude/settings.json`, `.mcp.json`, hooks, custom agents, and `CLAUDE.md`, plus your user settings (`~/.claude`; in Docker, the `agentbridge-claude-home` volume at `/home/app/.claude`). It deliberately omits the `local` source (`.claude/settings.local.json`) so AgentBridge never reads or **creates a `.claude` file in your workspace** — approvals flow through the Allow/Deny card instead. Tune with `AGENTBRIDGE_CLAUDE_SETTING_SOURCES`.
   - **Agent Skills.** The agent picks up your workspace's [Agent Skills](https://code.claude.com/docs/en/skills) (`.claude/skills/*/SKILL.md`) and invokes them when relevant. Because each chat runs in its own worktree (a checkout), AgentBridge copies your workspace's `.claude/skills/` into the worktree so **even uncommitted skills** are available — and keeps that copy out of the live preview and out of PRs. Type **`/`** in the composer to browse/filter your skills (↑/↓ + Enter to pick), then add details and send.
-- **Cursor** picks up `.cursor/rules`, `.cursorrules`, and `AGENTS.md` automatically.
+- **Cursor** picks up `.cursor/rules`, `.cursorrules`, and `AGENTS.md` automatically. Two bridges give it parity with Claude Code where the headless CLI allows:
+  - **MCP plugins.** The MCP servers you enable in the widget are written to `.cursor/mcp.json` in the chat's worktree at session start (and auto-approved with `--approve-mcps`), so the same Figma/etc. plugins work under Cursor. That file is kept out of the live preview and out of PRs.
+  - **`CLAUDE.md`.** Cursor doesn't read `CLAUDE.md` natively — if your repo has one but no `AGENTS.md`, its contents are injected as a one-time preamble on the chat's first turn so Cursor gets the same project guidance.
+  - **Model picker.** Cursor advertises its own model list (Auto / GPT-5 / Sonnet 4.5 / Opus 4.1 / …), passed per turn via `--model`. Effort and Plan mode aren't exposed by the headless CLI, so those pickers stay hidden for Cursor.
 
 ---
 

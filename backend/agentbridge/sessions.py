@@ -216,9 +216,10 @@ class Session:
             paths.update(line.strip() for line in out.splitlines() if line.strip())
         except Exception:  # noqa: BLE001
             pass
-        # Never mirror agent config (.claude — incl. the skills we copy in) into the workspace; it
-        # isn't the agent's work and reverting it could delete the user's own .claude files.
-        return sorted(p for p in paths if not p.startswith(".claude/"))
+        # Never mirror agent config (.claude — incl. the skills we copy in; .cursor — the MCP
+        # config we write for Cursor) into the workspace; it isn't the agent's work and reverting
+        # it could delete the user's own config files.
+        return sorted(p for p in paths if not p.startswith((".claude/", ".cursor/")))
 
     async def _ensure_adapter(self) -> None:
         if self.adapter is not None:
@@ -568,8 +569,9 @@ class Session:
     def _commit_pr_blocking(self, branch: str, title: str, body: str) -> PullRequest:
         """Commit the worktree's changes (no-op if a prior attempt already committed), push the
         chat's branch, and open the PR. Blocking; runs via asyncio.to_thread."""
-        # Commit the agent's work, but never the .claude config we copy in (skills) or scratch.
-        self.git.commit_all(title, exclude=[".claude", ".agentbridge"])
+        # Commit the agent's work, but never the config we inject (.claude skills, .cursor MCP)
+        # or scratch (.agentbridge).
+        self.git.commit_all(title, exclude=[".claude", ".cursor", ".agentbridge"])
         if not self._has_commits_ahead():
             raise GitError("Nothing to commit for the agent's changes.")
         self.git.push(branch, token=self.github_token)

@@ -388,6 +388,10 @@ async function main() {
   assert.ok(prMsg && prMsg.notes === "Ticket: ABC-123", "PR notes not sent with create_pr");
   widget.activeChatId = null;
 
+  // Cursor rules note documents where Cursor picks up project guidance + MCP.
+  const cursorNote = widget.shadow.querySelector(".ab-cursor-note");
+  assert.ok(cursorNote && /\.cursor\/rules/.test(cursorNote.textContent), "Cursor rules note missing");
+
   widget._togglePlugins(false);
   assert.ok(!pluginsPanel.classList.contains("open"), "plugins panel should close");
 

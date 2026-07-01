@@ -491,7 +491,18 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
     addBtn.addEventListener("click", function () { self._openPluginForm(null); });
     var presets = h("div", { class: "ab-plugins-presets" }, [figma, figmaDev, figmaKey, addBtn]);
     this.pluginForm = h("div", { class: "ab-plugin-form" });   // populated by _openPluginForm
-    this.pluginsPanel = h("div", { class: "ab-plugins" }, [head, prSection, intro, this.pluginsList, presets, this.pluginForm]);
+
+    // Cursor picks up project rules from the repo itself (not the widget). Note it so users
+    // know where to put agent guidance when Cursor is the active agent.
+    var cursorNote = h("div", { class: "ab-settings-section ab-cursor-note" }, [
+      h("div", { class: "ab-settings-label", text: "Cursor project rules" }),
+      h("div", { class: "ab-plugins-intro", text:
+        "Cursor reads .cursor/rules, .cursorrules and AGENTS.md from your repo. If only a " +
+        "CLAUDE.md is present, its contents are bridged in automatically. Enabled plugins above " +
+        "are written to .cursor/mcp.json for Cursor sessions." }),
+    ]);
+
+    this.pluginsPanel = h("div", { class: "ab-plugins" }, [head, prSection, intro, this.pluginsList, presets, cursorNote, this.pluginForm]);
   };
 
   AgentBridgeWidget.prototype._togglePlugins = function (force) {
