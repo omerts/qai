@@ -138,11 +138,31 @@ for mount, directory in (("/widget", _WIDGET_DIST), ("/widget-src", _WIDGET_SRC)
         )
 
 
+def _configure_logging() -> None:
+    """Make the ``agentbridge`` logger actually emit. uvicorn configures only its own loggers,
+    so without this our ``_log.info(...)`` diagnostics (agent launches, turn outcomes, MCP wiring)
+    are silently dropped. Level is tunable via ``AGENTBRIDGE_LOG_LEVEL`` (default INFO)."""
+    import os
+
+    level_name = os.environ.get("AGENTBRIDGE_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    logger = logging.getLogger("agentbridge")
+    logger.setLevel(level)
+    if not logger.handlers:  # idempotent: don't stack handlers on reload
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
+        logger.addHandler(handler)
+    logger.propagate = False  # we have our own handler; avoid double lines via the root logger
+
+
 def run() -> None:
     """Console-script entry point (``agentbridge``)."""
     import uvicorn
 
+    _configure_logging()
     settings = get_settings()
+    _log.info("AgentBridge %s starting on %s:%s (workspace=%s)",
+              __version__, settings.host, settings.port, settings.workspace)
     uvicorn.run(app, host=settings.host, port=settings.port)
 
 
