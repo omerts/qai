@@ -34,6 +34,9 @@ services:
       #  - API billing: set ANTHROPIC_API_KEY. If both are set, the API key wins.
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Cursor agent auth (optional): a Cursor user API key enables headless `cursor-agent`
+      # without an interactive `cursor-agent login`. Generate one in Cursor → Dashboard → API Keys.
+      CURSOR_API_KEY: ${CURSOR_API_KEY:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     volumes:
       # The repo the agent operates on. Read-write: the agent edits files and runs git here.

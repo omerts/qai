@@ -29,9 +29,9 @@ AgentBridge drops a chat bubble into any web app. You describe a change (optiona
 - **Git** and a **GitHub repo** you want to edit (PR creation is GitHub-only for now).
 - A coding agent on the machine running the backend:
   - **Claude Code** — the `@anthropic-ai/claude-code` CLI + a Claude subscription token or `ANTHROPIC_API_KEY`, or
-  - **Cursor** — the `cursor-agent` CLI.
+  - **Cursor** — the `cursor-agent` CLI, authenticated either with `cursor-agent login` or, for headless/Docker use, a `CURSOR_API_KEY` (see below).
 - For a **direct (non-Docker)** run: **Python 3.10+** and **Node 18+** (to build the widget).
-- For **Docker**: just Docker + Docker Compose (the image bundles git, Node, and the Claude Code CLI).
+- For **Docker**: just Docker + Docker Compose (the image bundles git, Node, the Claude Code CLI, and the Cursor CLI).
 
 ---
 
@@ -61,6 +61,7 @@ Open your app, click the chat bubble, pick an agent, and start. Framework snippe
 | `WORKSPACE`                 | ✅       | Absolute path to the git repo the agent edits (bind-mounted at `/workspace`).                                                    |
 | `CLAUDE_CODE_OAUTH_TOKEN`   | one of   | Claude subscription token from `claude setup-token` (no API billing).                                                            |
 | `ANTHROPIC_API_KEY`         | one of   | Use API billing instead. If both are set, the API key wins.                                                                      |
+| `CURSOR_API_KEY`            | for Cursor | A Cursor user API key (Cursor → Dashboard → API Keys) — enables the **Cursor** agent headless, no interactive `cursor-agent login`. |
 | `GITHUB_TOKEN` / `GH_TOKEN` | for PRs  | Token with `repo` scope — used to push and open PRs over HTTPS (no ssh needed).                                                  |
 | `PUID` / `PGID`             | optional | Run as your host user so the agent's edits stay owned by you. Defaults to `1000:1000`; set to your `id -u`/`id -g` if different. |
 
