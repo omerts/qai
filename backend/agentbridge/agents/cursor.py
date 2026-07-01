@@ -34,11 +34,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import shutil
 from pathlib import Path
 from typing import AsyncIterator
 
 from .base import AgentAdapter, AgentEvent, Capabilities, SessionContext
+
+_log = logging.getLogger("agentbridge")
 
 _BINARY = "cursor-agent"
 _FILE_TOOLS = {"edit", "write", "create", "multiedit", "str_replace", "apply_patch", "search_replace"}
@@ -205,6 +208,8 @@ class CursorAdapter(AgentAdapter):
             self._preamble = ""
         cmd = self._build_command(text)
         self._interrupted = False
+        _log.info("cursor-agent launching: model=%s chat=%s cwd=%s",
+                  self._model_id or "(default)", self._chat_id or "(new)", self.workspace)
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -220,19 +225,36 @@ class CursorAdapter(AgentAdapter):
         self._proc = proc
         stderr_task = asyncio.create_task(self._drain(proc.stderr))
 
+        produced = False  # did the turn emit any visible output (text or a file edit)?
         try:
             while True:
                 line = await proc.stdout.readline()
                 if not line:
                     break
                 for event in self._parse_line(line.decode(errors="replace")):
+                    if event.kind in ("chunk", "file_touched", "error"):
+                        produced = True
                     yield event
 
             await proc.wait()
             stderr = (await stderr_task).strip()
+            rc = proc.returncode
+            if not (self._interrupted and rc not in (0, None)):
+                _log.info("cursor-agent turn finished rc=%s produced=%s%s",
+                          rc, produced, f" stderr={stderr[-500:]!r}" if stderr else "")
             # A user-requested stop kills the process — that's expected, not an error.
-            if not self._interrupted and proc.returncode not in (0, None):
-                yield AgentEvent.error(f"Cursor agent failed: {stderr or f'exit code {proc.returncode}'}")
+            if self._interrupted:
+                pass
+            elif rc not in (0, None):
+                yield AgentEvent.error(f"Cursor agent failed: {stderr or f'exit code {rc}'}")
+                return
+            elif not produced:
+                # Exited cleanly but said nothing — surface why instead of a silent, empty turn
+                # (e.g. an MCP server that couldn't start, or an error carried in stderr).
+                yield AgentEvent.error(
+                    "Cursor produced no output. "
+                    + (stderr or "Check CURSOR_API_KEY and any enabled MCP plugins, then retry.")
+                )
                 return
             yield AgentEvent.done()
         finally:
@@ -288,9 +310,19 @@ class CursorAdapter(AgentAdapter):
             self._chat_id = str(sid)
 
         etype = obj.get("type")
-        # Skip the final aggregate result to avoid duplicating streamed deltas.
         if etype == "result":
+            # The final aggregate result normally just repeats streamed text — skip it to avoid
+            # duplication. But if it flags an error, that's the ONLY place the reason appears, so
+            # surface it (otherwise the turn ends silently).
+            if obj.get("is_error") or str(obj.get("subtype") or "").lower() in ("error", "error_max_turns"):
+                msg = obj.get("result") or obj.get("error") or obj.get("subtype") or "unknown error"
+                return [AgentEvent.error(f"Cursor error: {msg}")]
             return []
+
+        # An explicit error event (some versions emit one mid-stream).
+        if etype == "error" or obj.get("is_error"):
+            msg = obj.get("message") or obj.get("error") or obj.get("result") or "unknown error"
+            return [AgentEvent.error(f"Cursor error: {msg}")]
 
         events: list[AgentEvent] = []
         events += self._text_events(obj)

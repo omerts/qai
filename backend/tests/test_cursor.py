@@ -119,3 +119,20 @@ def test_parse_non_json_line_is_emitted_verbatim():
     a = CursorAdapter(Path("."))
     events = a._parse_line("plain text output")
     assert events[0].kind == "chunk" and "plain text output" in events[0].text
+
+
+def test_parse_success_result_is_skipped():
+    a = CursorAdapter(Path("."))
+    assert a._parse_line('{"type":"result","subtype":"success","result":"done"}') == []
+
+
+def test_parse_error_result_is_surfaced():
+    a = CursorAdapter(Path("."))
+    events = a._parse_line('{"type":"result","subtype":"error","is_error":true,"result":"rate limited"}')
+    assert len(events) == 1 and events[0].kind == "error" and "rate limited" in events[0].text
+
+
+def test_parse_error_event_is_surfaced():
+    a = CursorAdapter(Path("."))
+    events = a._parse_line('{"type":"error","message":"model not found"}')
+    assert events[0].kind == "error" and "model not found" in events[0].text
