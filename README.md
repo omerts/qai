@@ -147,7 +147,7 @@ Agents run _in your workspace_ and honor its own configuration:
 - **Cursor** picks up `.cursor/rules`, `.cursorrules`, and `AGENTS.md` automatically. Two bridges give it parity with Claude Code where the headless CLI allows:
   - **MCP plugins.** The MCP servers you enable in the widget are written to `.cursor/mcp.json` in the chat's worktree at session start (and auto-approved with `--approve-mcps`), so the same Figma/etc. plugins work under Cursor. That file is kept out of the live preview and out of PRs.
   - **`CLAUDE.md`.** Cursor doesn't read `CLAUDE.md` natively — if your repo has one but no `AGENTS.md`, its contents are injected as a one-time preamble on the chat's first turn so Cursor gets the same project guidance.
-  - **Model picker.** Cursor advertises its own model list (Auto / GPT-5 / Sonnet 4.5 / Opus 4.1 / …), passed per turn via `--model`. Effort and Plan mode aren't exposed by the headless CLI, so those pickers stay hidden for Cursor.
+  - **Model picker.** Cursor's models are discovered at runtime from `cursor-agent --list-models` (account-specific — e.g. Composer, GPT-5.x, Claude Opus/Sonnet, Gemini), with **Default** first; the choice is passed per turn via `--model`. The list is cached per process; if the CLI can't be queried the picker is hidden rather than showing stale ids. Effort and Plan mode aren't exposed by the headless CLI, so those pickers stay hidden for Cursor.
 
 ---
 

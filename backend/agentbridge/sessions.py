@@ -923,7 +923,9 @@ class ChatHub:
 
     async def handle(self, msg: P.ClientMessage) -> None:
         if msg.type == "list_agents":
-            await self.send(P.Agents(agents=list_agent_info()))
+            # list_agent_info() may shell out to a CLI (e.g. Cursor's --list-models) the first
+            # time, so run it off the event loop to keep the socket responsive.
+            await self.send(P.Agents(agents=await asyncio.to_thread(list_agent_info)))
         elif msg.type == "list_chats":
             await self._send_chats()
         elif msg.type == "start_session":

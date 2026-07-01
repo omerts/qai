@@ -36,6 +36,7 @@ import asyncio
 import json
 import logging
 import shutil
+import subprocess
 from pathlib import Path
 from typing import AsyncIterator
 
@@ -52,17 +53,9 @@ class CursorAdapter(AgentAdapter):
     label = "Cursor"
     theme = {"accent": "#111827", "accentFg": "#ffffff"}  # Cursor near-black
 
-    #: Selectable models. Cursor's own source of truth is ``cursor-agent --list-models`` (which
-    #: needs auth + network, so we don't shell out to it on every connect); this curated set
-    #: tracks Cursor's documented CLI model aliases. ``""`` => Cursor's built-in auto default.
-    _MODELS = [
-        {"id": "", "label": "Auto (default)"},
-        {"id": "gpt-5", "label": "GPT-5"},
-        {"id": "sonnet-4.5", "label": "Sonnet 4.5"},
-        {"id": "sonnet-4.5-thinking", "label": "Sonnet 4.5 (thinking)"},
-        {"id": "opus-4.1", "label": "Opus 4.1"},
-        {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
-    ]
+    #: Discovered model list, cached at class level so we shell out to the CLI at most once per
+    #: process (model ids are account-specific and change often, so we never hardcode them).
+    _models_cache: list[dict[str, str]] | None = None
 
     def __init__(self, workspace: Path) -> None:
         super().__init__(workspace)
@@ -81,7 +74,54 @@ class CursorAdapter(AgentAdapter):
         return Capabilities(streaming=True, interactive=False, edits_files=True)
 
     def models(self) -> list[dict[str, str]]:
-        return [dict(m) for m in self._MODELS]
+        discovered = self._discover_models()
+        if not discovered:
+            return []  # couldn't list -> hide the picker rather than offer bogus ids
+        # "" => no --model flag => Cursor uses the account's configured default model.
+        return [{"id": "", "label": "Default"}] + discovered
+
+    @classmethod
+    def _discover_models(cls) -> list[dict[str, str]]:
+        """Model ids straight from ``cursor-agent --list-models`` (needs the auth that's present at
+        runtime), cached for the process. Best-effort: returns [] if the CLI is absent or fails."""
+        if cls._models_cache is not None:
+            return cls._models_cache
+        result: list[dict[str, str]] = []
+        if shutil.which(_BINARY):
+            try:
+                proc = subprocess.run(
+                    [_BINARY, "--list-models"], capture_output=True, text=True, timeout=10
+                )
+                if proc.returncode == 0:
+                    result = cls._parse_models(proc.stdout)
+                else:
+                    _log.info("cursor-agent --list-models failed rc=%s: %s",
+                              proc.returncode, (proc.stderr or "").strip()[:200])
+            except (OSError, subprocess.SubprocessError) as exc:
+                _log.info("cursor-agent --list-models errored: %s", exc)
+        cls._models_cache = result
+        return result
+
+    @staticmethod
+    def _parse_models(text: str) -> list[dict[str, str]]:
+        """Parse ``--list-models`` output. Each model is a ``<id> - <Label>`` line; the account
+        default is flagged ``(default)``. Header/blank lines (no ``" - "``, or an id with spaces)
+        are skipped."""
+        out: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for line in text.splitlines():
+            line = line.strip()
+            if " - " not in line:
+                continue
+            mid, _, label = line.partition(" - ")
+            mid, label = mid.strip(), label.strip()
+            if not mid or " " in mid or mid in seen:
+                continue
+            if label.endswith("(default)"):
+                label = label[: -len("(default)")].strip()
+            seen.add(mid)
+            out.append({"id": mid, "label": label or mid})
+        return out
 
     def set_model(self, model: str | None) -> None:
         self._model_id = model or None

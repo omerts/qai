@@ -20,11 +20,42 @@ def test_build_command_has_headless_flags():
     assert "--model" not in cmd   # default model
 
 
-def test_models_are_offered():
+_LIST_MODELS_SAMPLE = """Available models
+
+auto - Auto
+gpt-5.3-codex - Codex 5.3
+composer-2.5-fast - Composer 2.5 Fast (default)
+claude-opus-4-8-high - Opus 4.8 1M
+claude-sonnet-5-high - Sonnet 5 1M
+gemini-3.1-pro - Gemini 3.1 Pro
+"""
+
+
+def test_parse_models_from_cli_output():
+    parsed = CursorAdapter._parse_models(_LIST_MODELS_SAMPLE)
+    ids = [m["id"] for m in parsed]
+    # Header + blank lines skipped; every real id captured.
+    assert "Available" not in " ".join(ids)
+    assert ids == ["auto", "gpt-5.3-codex", "composer-2.5-fast",
+                   "claude-opus-4-8-high", "claude-sonnet-5-high", "gemini-3.1-pro"]
+    # "(default)" is stripped from the label.
+    default_row = next(m for m in parsed if m["id"] == "composer-2.5-fast")
+    assert default_row["label"] == "Composer 2.5 Fast"
+
+
+def test_models_prepends_default_when_discovered(monkeypatch):
+    monkeypatch.setattr(CursorAdapter, "_models_cache", None, raising=False)
+    monkeypatch.setattr(CursorAdapter, "_discover_models",
+                        classmethod(lambda cls: [{"id": "gpt-5.5-high", "label": "GPT-5.5"}]))
     models = CursorAdapter(Path(".")).models()
-    ids = [m["id"] for m in models]
-    assert "" in ids  # a default option
-    assert any(i for i in ids)  # at least one concrete model
+    assert models[0] == {"id": "", "label": "Default"}  # account default first
+    assert {"id": "gpt-5.5-high", "label": "GPT-5.5"} in models
+
+
+def test_models_empty_when_cli_absent(monkeypatch):
+    monkeypatch.setattr(CursorAdapter, "_models_cache", None, raising=False)
+    monkeypatch.setattr(CursorAdapter, "_discover_models", classmethod(lambda cls: []))
+    assert CursorAdapter(Path(".")).models() == []  # no picker rather than bogus ids
 
 
 def test_build_command_includes_selected_model():
