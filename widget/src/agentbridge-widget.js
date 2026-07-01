@@ -798,11 +798,13 @@ import { createThreadBridge, mountThread } from "./thread.jsx";
   AgentBridgeWidget.prototype._selectAgent = function () {
     this.selectedAgent = this.agentSelect.value || null;
     if (this.selectedAgent) lsSet(LS_AGENT, this.selectedAgent);
-    // Preview the picked agent immediately (theme + its pickers) — a chat's agent is fixed, so
-    // the dropdown reflects the agent you're choosing for your next chat.
+    // Preview the picked agent immediately (theme + its pickers).
     this._applyThemeFor(this.selectedAgent);
-    // First-run convenience: if nothing is open yet, start a chat right away.
-    if (this.selectedAgent && !this.activeChatId) this._newChat();
+    if (!this.selectedAgent) return;
+    // A chat's agent is fixed at creation, so picking a *different* agent than the open chat
+    // (or when nothing is open) starts a fresh chat — otherwise switching the dropdown would
+    // silently keep sending your messages to the previous agent.
+    if (!this.activeChatId || this.sessionAgent !== this.selectedAgent) this._newChat();
   };
 
   AgentBridgeWidget.prototype._newChat = function () {
