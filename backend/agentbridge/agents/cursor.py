@@ -63,6 +63,7 @@ class CursorAdapter(AgentAdapter):
         self._proc: asyncio.subprocess.Process | None = None
         self._interrupted: bool = False
         self._model_id: str | None = None  # selected model id (None/"" => Cursor default)
+        self._mode: str | None = None      # "plan" => read-only planning; None => normal edits
         self._preamble: str = ""           # CLAUDE.md bridge text to inject on the first turn
 
     @classmethod
@@ -70,8 +71,13 @@ class CursorAdapter(AgentAdapter):
         return shutil.which(_BINARY) is not None
 
     def capabilities(self) -> Capabilities:
-        # cursor-agent --print is non-interactive (no mid-run prompts to us).
-        return Capabilities(streaming=True, interactive=False, edits_files=True)
+        # cursor-agent --print is non-interactive (no mid-run prompts to us), but it does support
+        # a read-only plan mode (--mode plan) that we expose like Claude's plan mode.
+        return Capabilities(streaming=True, interactive=False, edits_files=True, plan_mode=True)
+
+    def set_mode(self, mode: str | None) -> None:
+        # Only "plan" (read-only planning) is distinct; anything else is normal edit mode.
+        self._mode = "plan" if mode == "plan" else None
 
     def models(self) -> list[dict[str, str]]:
         discovered = self._discover_models()
@@ -219,6 +225,8 @@ class CursorAdapter(AgentAdapter):
         ]
         if self._model_id:
             cmd += ["--model", self._model_id]
+        if self._mode == "plan":
+            cmd += ["--mode", "plan"]  # read-only: analyze & propose a plan, make no edits
         if self._chat_id:
             cmd += ["--resume", self._chat_id]
         cmd += ["--", text]  # terminate options; prompt is positional

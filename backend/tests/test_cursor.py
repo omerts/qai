@@ -67,6 +67,17 @@ def test_build_command_includes_selected_model():
     assert "--model" not in a._build_command("hi")
 
 
+def test_plan_mode_is_supported_and_flagged():
+    a = CursorAdapter(Path("."))
+    assert a.capabilities().plan_mode is True
+    assert "--mode" not in a._build_command("hi")  # default: no plan flag
+    a.set_mode("plan")
+    cmd = a._build_command("hi")
+    assert cmd[cmd.index("--mode") + 1] == "plan"
+    a.set_mode("default")  # back to normal edit mode
+    assert "--mode" not in a._build_command("hi")
+
+
 def test_write_mcp_config_translates_and_merges(tmp_path):
     a = CursorAdapter(tmp_path)
     a._write_mcp_config({
